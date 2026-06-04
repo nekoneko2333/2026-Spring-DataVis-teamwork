@@ -1,0 +1,14 @@
+affineOutputView	Create output view for warping images （自 R2019b 起）
+affinetform3d	3-D affine geometric transformation （自 R2022b 起）
+imcrop3	Crop 3-D image （自 R2019b 起）
+imref3d	Reference 3-D image to world coordinates
+imregister	Intensity-based image registration
+imregdemons	Estimate displacement field that aligns two 2-D or 3-D images
+imresize3	Resize 3-D volumetric intensity image
+imrotate3	Rotate 3-D volumetric grayscale image
+imwarp	对图像应用几何变换
+rigidtform3d	3-D rigid geometric transformation （自 R2022b 起）
+simtform3d	3-D similarity geometric transformation （自 R2022b 起）
+transltform3d	3-D translation geometric transformation （自 R2022b 起）
+transformPointsForward	Apply forward geometric transformation
+transformPointsInverse	Apply inverse geometric transformation

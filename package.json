@@ -1,0 +1,19 @@
+{
+  "name": "nyx-cosmic-explorer",
+  "version": "1.0.0",
+  "description": "Nyx 宇宙学模拟数据可视分析系统 — 三维体渲染 + 相空间刷选联动 + 宇宙网形态学",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "d3": "^7.9.0",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0",
+    "vite": "^5.4.0"
+  }
+}

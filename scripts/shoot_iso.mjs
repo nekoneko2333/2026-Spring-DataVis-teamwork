@@ -1,0 +1,13 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch({ headless: true, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+const page = await browser.newPage({ viewport: { width: 1680, height: 1000 } });
+await page.goto("http://localhost:5173/", { waitUntil: "networkidle", timeout: 60000 });
+await page.waitForFunction(() => document.querySelector("#loadingOverlay")?.classList.contains("hidden"), { timeout: 45000 });
+await page.evaluate(() => { window.__app.setStep(99); });
+await page.waitForTimeout(6000);
+await page.evaluate(() => window.__app._setMode(2));
+await page.waitForTimeout(6000);
+const el = await page.$("#viewport"); const box = await el.boundingBox();
+await page.screenshot({ path: "outputs/screens/04_t99_iso.png", clip: box });
+console.log("iso shot done");
+await browser.close();
