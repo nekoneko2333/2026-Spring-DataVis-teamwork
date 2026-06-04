@@ -1,99 +1,142 @@
 # Nyx Cosmic Explorer
 
-基于本地 **Nyx 宇宙学模拟**气体密度场（100 个时间步、128³）的交互式三维体数据可视分析系统。
-Web 前端用 **Three.js + WebGL2 3D 纹理光线步进**做全分辨率实时体渲染，**D3** 做联动图表；
-Python 做预处理与统计。核心能力：体渲染多模式、时间演化、**相空间刷选统计-空间双向联动**、
-宇宙网形态学分类（Cosmic Atlas）、合成莱曼-α 探针（Cosmic Probe）、演化指纹图与功率谱。
+基于 Nyx 宇宙学模拟气体密度场的交互式三维体数据可视分析系统。前端使用 Vite、Three.js 和 D3，Python 脚本负责原始数据预处理、统计分析和报告图生成。
 
-![主界面](outputs/screens/01_main_default.png)
+## 项目说明
 
----
+本仓库只提交源码、配置、文档和预处理脚本。以下目录体积较大或可生成，已被 `.gitignore` 排除，不会随 GitHub 仓库一起下载：
 
-## 1. 数据事实
+- `Nyx/`：原始模拟数据，约 100 个 `*.dat` 文件。
+- `public/data/`：前端运行需要的预处理数据，约 860 MB。
+- `outputs/`：报告图片、截图和分析输出。
+- `node_modules/`、`dist/`：依赖和构建产物。
 
-- 路径：`Nyx/0000.dat ~ 0099.dat`；单文件 8,388,608 B = 2,097,152 `float32` = 128×128×128。
-- little-endian `float32`，**列优先**（z 变化最快）：`np.fromfile('<f4').reshape((128,128,128), order='F')` → `(z,y,x)`。
-- 物理量为气体密度场；**探查确认存储值已是 log-density**（范围 ≈ 7.75–14.52，无 0/负值），故管线直接当作 log 密度，不再取 log。
+因此，其他人 clone 仓库后需要先准备数据，再启动前端。
 
-## 2. 环境准备
+## 环境要求
+
+- Node.js 18+
+- Python 3.10+
+- 现代浏览器，建议 Chrome 或 Edge，并支持 WebGL2
+
+## 从 GitHub 拉取后运行
 
 ```bash
-# Python (预处理 / 统计 / 静态图)
-pip install -r requirements.txt
+git clone https://github.com/nekoneko2333/2026-Spring-DataVis-teamwork.git
+cd 2026-Spring-DataVis-teamwork
+```
 
-# 前端
+安装前端依赖：
+
+```bash
 npm install
 ```
 
-要求：Python 3.10+，Node 18+，支持 WebGL2 + float 纹理线性插值的现代浏览器（Chrome/Edge/Firefox）。
-
-## 3. 预处理（首次运行，生成 public/data）
+安装 Python 依赖：
 
 ```bash
-python preprocess/explore.py       # 数据探查 + 轴向核对图 (outputs/explore/)
-python preprocess/preprocess.py    # metadata/stats/histograms/powerspectrum + u16 体数据 + 预览  (~1 min)
-python preprocess/morphology.py    # density-Hessian 形态学标签 + 连通域分析 (labels/ + morphology.json)
-python preprocess/tweb.py          # 严格 T-web: 解 Poisson 求势场潮汐张量分类 (labels_tweb/)
-python preprocess/mc_export.py     # Marching Cubes 真实三角网格 (meshes/ + mc_manifest.json)
-python preprocess/density_check.py # log 底数/绝对密度的质量守恒检验 (mass_conservation.png)
-python preprocess/figures.py       # 报告静态统计图 (outputs/)
-python preprocess/figures_rich.py  # 丰富版静态图: 莱曼-α/形态学切片/骨架/连通域/双步对比 + 演化与穿越 GIF
+pip install -r requirements.txt
 ```
 
-生成约 **860 MB** 静态数据于 `public/data/`（400 MB u16 体数据 + 200 MB density-Hessian 标签 + 200 MB T-web 标签 + 31 MB MC 网格 + 25 MB 预览 + json）。
+## 准备数据
 
-## 4. 启动可视化系统
+项目运行需要 `public/data/`。有两种方式准备。
+
+方式一：直接复制已经生成好的数据
+
+如果团队成员已经提供了完整的 `public/data/`，把它放到项目根目录下：
+
+```text
+2026-Spring-DataVis-teamwork/
+  public/
+    data/
+      metadata.json
+      stats.json
+      histograms.json
+      powerspectrum.json
+      morphology.json
+      preview_u8.bin
+      volumes/
+      labels/
+      labels_tweb/
+      meshes/
+```
+
+方式二：从原始 Nyx 数据重新生成
+
+把原始数据放到项目根目录的 `Nyx/` 文件夹中：
+
+```text
+2026-Spring-DataVis-teamwork/
+  Nyx/
+    0000.dat
+    0001.dat
+    ...
+    0099.dat
+```
+
+然后按顺序运行预处理脚本：
 
 ```bash
-npm run dev      # http://localhost:5173/
+python preprocess/explore.py
+python preprocess/preprocess.py
+python preprocess/morphology.py
+python preprocess/tweb.py
+python preprocess/mc_export.py
 ```
 
-大体数据通过 Vite 静态 + Range 请求**按需流式加载**，前端做 **LRU 缓存 + 邻步预取**；
-播放/拖动时用 64³ 预览保帧率，停稳后自动换全分辨率。
+可选：生成报告分析图和截图输出：
 
-## 5. 功能导览
-
-- **中央 3D 主视图**：体渲染 / MIP / 等值面 / Top1% 高亮 / Void 空洞 / **MC 真实网格** 六模式；旋转/缩放/平移；梯度光照。
-- **左侧**：时间轴（**线性 ↔ 螺旋**可切换，节点颜色=Gini，大小=高密度占比）、播放控制、自适应传递函数编辑（Cosmic/Fire/Ice/Spectral）。
-- **右侧**：当前步统计、选区联动统计、宇宙网形态学占比 + Cosmic Atlas 控制。
-- **底部**：log 密度直方图（**D3 刷选**）、演化指纹图、统计量曲线、功率谱 P(k)、探针剖面/莱曼-α。
-- **相空间刷选**：直方图框选 → 3D 实时只显示匹配体素 + 选区体素数/占比/均值/最大值；快捷按钮 Void/Sheet/Filament/Node/Top1%/Top0.1%。
-- **Cosmic Atlas**：叠加 void/sheet/filament/node 形态学分类（金/青/蓝），**density-Hessian ↔ 严格 T-web 一键切换**。
-- **MC 真实网格**：Marching Cubes 抽取的等值面三角网格，场景光照渲染。
-- **Cosmic Probe**：在 3D 中点击拉出视线 → 实时密度剖面 + 莱曼-α proxy 吸收谱。
-- **Story Mode**：一键叙事导览“均匀→成丝→分化→图谱”。
-
-## 6. 工程结构
-
-```
-preprocess/        explore.py / preprocess.py / morphology.py / tweb.py / mc_export.py / figures.py
-public/data/       metadata|stats|histograms|powerspectrum|morphology|mc_manifest.json,
-                   volumes/*.bin, labels/*.bin, labels_tweb/*.bin, meshes/*.bin, preview_u8.bin
-src/
-  state.js         中央状态 + 事件总线
-  data/DataManager.js        流式加载 / LRU / 预览 / 视线采样
-  visualization/   shaders.js, VolumeRenderer.js, TransferFunction.js
-  charts/          Histogram, Fingerprint, TimeSeries, PowerSpectrum, Timeline, ProbePanel
-  main.js          编排与 UI 装配
-scripts/           shoot*.mjs  (headless 截图验证)
-outputs/           报告静态图 + 截图
-report_draft.md    答辩报告草稿
+```bash
+python preprocess/density_check.py
+python preprocess/figures.py
+python preprocess/figures_rich.py
 ```
 
-## 7. 物理限定（如实标注，避免过度宣称）
+## 启动开发服务器
 
-- **莱曼-α**：当前数据仅含密度，缺温度/电离态/速度场，采用密度驱动 proxy `τ = A·∫ρ^β ds`，**非严格辐射转移**。
-- **形态学分类**：提供两种——① density-Hessian 近似（仅用密度场）；② **严格 T-web**（解 Poisson 求引力势潮汐张量，Hahn2007/Forero-Romero2009）。前端可切换对比。
-- 传递函数阈值、刷选区间、形态学阈值均**基于真实分位数/调参**，非拍脑袋。
+确认 `public/data/` 已存在后运行：
 
-## 8. 验证
-
-`scripts/shoot*.mjs` 用 headless Chromium（SwiftShader）加载系统、采集控制台错误并截图，
-确认五种渲染模式、刷选联动、各图表与探针均正常工作、无运行时错误（见 `outputs/screens/`）。
-> 注：SwiftShader 软渲染较慢，仅用于自动化验证；真实 GPU 上体渲染实时流畅。
+```bash
+npm run dev
 ```
-node scripts/shoot.mjs            # 主界面
-SHOTS=interact node scripts/shoot.mjs   # 各模式
-node scripts/shoot_charts.mjs     # 图表 tab + 探针
-node scripts/shoot_report.mjs     # 报告体渲染图
+
+浏览器打开：
+
+```text
+http://localhost:5173/
 ```
+
+## 构建生产版本
+
+```bash
+npm run build
+```
+
+构建结果会生成到 `dist/`。本地预览：
+
+```bash
+npm run preview
+```
+
+## 项目结构
+
+```text
+src/                 前端源码
+src/visualization/   Three.js 体渲染、传递函数和 shader
+src/charts/          D3 图表组件
+src/data/            数据加载和缓存逻辑
+preprocess/          Python 数据预处理和统计脚本
+scripts/             Playwright 截图验证脚本
+public/data/         预处理后的前端数据，不提交到 Git
+Nyx/                 原始模拟数据，不提交到 Git
+outputs/             分析图和截图输出，不提交到 Git
+```
+
+## 常见问题
+
+如果页面打开后没有数据或控制台出现 `404`，通常是因为缺少 `public/data/`。请先复制团队提供的数据，或者使用 `Nyx/` 原始数据运行预处理脚本。
+
+如果 `npm install` 失败，先确认 Node.js 版本是否为 18 或更高。
+
+如果 Python 脚本找不到数据，确认原始文件路径为 `Nyx/0000.dat` 到 `Nyx/0099.dat`，并且命令是在项目根目录执行。
