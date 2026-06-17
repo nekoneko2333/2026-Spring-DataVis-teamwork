@@ -4,7 +4,7 @@ import {
   Scene, PerspectiveCamera, WebGLRenderer, BoxGeometry, Mesh, ShaderMaterial,
   GLSL3, Vector3, Vector2, BackSide, DoubleSide, LineSegments, EdgesGeometry,
   LineBasicMaterial, BufferGeometry, Line, AdditiveBlending,
-  Data3DTexture, RedFormat, FloatType, NearestFilter,
+  Data3DTexture, RedFormat, RGBFormat, FloatType, NearestFilter, UnsignedByteType,
   MeshStandardMaterial, AmbientLight, DirectionalLight, BufferAttribute, Float32BufferAttribute,
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -13,6 +13,14 @@ import { volumeVert, volumeFrag } from "./shaders.js";
 function dummy3D() {
   const t = new Data3DTexture(new Float32Array(1), 1, 1, 1);
   t.format = RedFormat; t.type = FloatType;
+  t.minFilter = t.magFilter = NearestFilter;
+  t.needsUpdate = true;
+  return t;
+}
+
+function dummyGradient3D() {
+  const t = new Data3DTexture(new Uint8Array([127, 127, 127]), 1, 1, 1);
+  t.format = RGBFormat; t.type = UnsignedByteType;
   t.minFilter = t.magFilter = NearestFilter;
   t.needsUpdate = true;
   return t;
@@ -38,22 +46,34 @@ export class VolumeRenderer {
     this.controls.rotateSpeed = 0.8;
     this.controls.minDistance = 0.7;
     this.controls.maxDistance = 6;
+    this.baseStepCount = 256;
+    this.interactionStepCount = 160;
+    this.isInteracting = false;
+    this.controls.addEventListener("start", () => {
+      this.isInteracting = true;
+      this._applyStepCount();
+    });
+    this.controls.addEventListener("end", () => {
+      this.isInteracting = false;
+      this._applyStepCount();
+    });
 
     this.uniforms = {
       uVolume: { value: dummy3D() },
+      uGradient: { value: dummyGradient3D() },
       uLabel: { value: dummy3D() },
       uTF: { value: tfTexture },
       uCameraPos: { value: new Vector3() },
       uMode: { value: 0 },
-      uStepCount: { value: 256 },
-      uDensityScale: { value: 1.3 },
+      uStepCount: { value: this.baseStepCount },
+      uDensityScale: { value: 0.80 },
       uIso: { value: 0.40 },
       uHiClip: { value: 0.78 },
       uLoClip: { value: 0.30 },
       uBrushActive: { value: false },
       uBrushMin: { value: 0 },
       uBrushMax: { value: 1 },
-      uGradEps: { value: 1.0 / meta.shape[2] },
+      uGradScale: { value: 1.0 },
       uLightDir: { value: new Vector3(0.6, 0.8, 0.5).normalize() },
       uTime: { value: 0 },
       uAtlasActive: { value: false },
@@ -108,10 +128,17 @@ export class VolumeRenderer {
   }
 
   setVolumeTexture(t) { this.uniforms.uVolume.value = t; }
+  setGradientTexture(t, scale) {
+    this.uniforms.uGradient.value = t;
+    if (scale != null) this.uniforms.uGradScale.value = scale;
+  }
   setLabelTexture(t) { this.uniforms.uLabel.value = t; }
   setTF(t) { this.uniforms.uTF.value = t; }
   setMode(m) { this.uniforms.uMode.value = m; }
-  setSteps(s) { this.uniforms.uStepCount.value = s; }
+  setSteps(s) {
+    this.baseStepCount = s;
+    this._applyStepCount();
+  }
   setDensityScale(s) { this.uniforms.uDensityScale.value = s; }
   setIso(v) { this.uniforms.uIso.value = v; }
   setHiClip(v) { this.uniforms.uHiClip.value = v; }
@@ -194,6 +221,13 @@ export class VolumeRenderer {
     this.renderer.setSize(r.width, r.height, false);
     this.camera.aspect = r.width / r.height;
     this.camera.updateProjectionMatrix();
+  }
+
+  _applyStepCount() {
+    const steps = this.isInteracting
+      ? Math.min(this.baseStepCount, this.interactionStepCount)
+      : this.baseStepCount;
+    this.uniforms.uStepCount.value = steps;
   }
 
   _loop() {

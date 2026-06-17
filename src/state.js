@@ -31,7 +31,7 @@ export const state = {
   brush: { active: false, min: 0, max: 1, label: null },
 
   // 传递函数
-  tf: { preset: "cosmic", densityScale: 1.3, isoValue: 0.40, steps: 256 },
+  tf: { densityScale: 0.80, isoValue: 0.40, steps: 256 },
 
   // 形态学叠加 (Cosmic Atlas); method: 'proxy'(density-Hessian) | 'tweb'(严格 T-web)
   atlas: { active: false, opacity: 0.55, method: "tweb", classes: { sheet: false, filament: true, node: true } },

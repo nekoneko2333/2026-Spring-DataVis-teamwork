@@ -1,12 +1,14 @@
-// 基于分位数的自适应传递函数: 把归一化 log-density [0,1] 映射到 RGBA。
-// 颜色: void 深蓝/黑 -> filament 青/紫 -> node 金 -> top 白(发光);
-// 透明度: void 近透明, 随密度上升, 突出宇宙网结构。
 import { DataTexture, RGBAFormat, UnsignedByteType, LinearFilter, ClampToEdgeWrapping } from "three";
 
 const LUT_N = 256;
 
 function hexRGB(h) {
   return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+}
+
+function rgbHex(c) {
+  const h = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+  return `#${h(c[0])}${h(c[1])}${h(c[2])}`;
 }
 
 function lerp(a, b, t) { return a + (b - a) * t; }
@@ -35,40 +37,29 @@ function sampleAnchors(anchors, x) {
   return anchors[anchors.length - 1][1];
 }
 
-// 颜色预设
-function colorStops(preset, q) {
-  // q: 归一化分位数 {25,50,75,90,95,99,999}
-  switch (preset) {
-    case "fire":
-      return [
-        { p: 0.0, c: hexRGB("#05030a") }, { p: q.q25, c: hexRGB("#2a0a06") },
-        { p: q.q50, c: hexRGB("#7a1e08") }, { p: q.q75, c: hexRGB("#d4561a") },
-        { p: q.q95, c: hexRGB("#ffae33") }, { p: q.q999, c: hexRGB("#fff2b0") },
-        { p: 1.0, c: hexRGB("#ffffff") },
-      ];
-    case "ice":
-      return [
-        { p: 0.0, c: hexRGB("#02040c") }, { p: q.q25, c: hexRGB("#081634") },
-        { p: q.q50, c: hexRGB("#0f3a78") }, { p: q.q75, c: hexRGB("#2f8ad8") },
-        { p: q.q95, c: hexRGB("#79d6ff") }, { p: q.q999, c: hexRGB("#d8f6ff") },
-        { p: 1.0, c: hexRGB("#ffffff") },
-      ];
-    case "spectral":
-      return [
-        { p: 0.0, c: hexRGB("#08030f") }, { p: q.q25, c: hexRGB("#23206b") },
-        { p: q.q50, c: hexRGB("#1f8f9e") }, { p: q.q75, c: hexRGB("#6fcf52") },
-        { p: q.q90, c: hexRGB("#f2d43d") }, { p: q.q99, c: hexRGB("#ef5d3a") },
-        { p: 1.0, c: hexRGB("#fff3e8") },
-      ];
-    case "cosmic":
-    default:
-      return [
-        { p: 0.0, c: hexRGB("#03040c") }, { p: q.q25, c: hexRGB("#0a1838") },
-        { p: q.q50, c: hexRGB("#163a6b") }, { p: q.q75, c: hexRGB("#1f8fae") },
-        { p: q.q90, c: hexRGB("#38e1d6") }, { p: q.q95, c: hexRGB("#a78bfa") },
-        { p: q.q99, c: hexRGB("#ffcc66") }, { p: 1.0, c: hexRGB("#fffaf0") },
-      ];
-  }
+function colorStops(q) {
+  return [
+    { p: 0.0, c: hexRGB("#02030a") }, { p: q.q25, c: hexRGB("#09101c") },
+    { p: q.q50, c: hexRGB("#123249") }, { p: q.q75, c: hexRGB("#176c79") },
+    { p: q.q90, c: hexRGB("#20b8b2") }, { p: q.q95, c: hexRGB("#78d2c8") },
+    { p: q.q99, c: hexRGB("#e8b14a") }, { p: 1.0, c: hexRGB("#f7eed7") },
+  ];
+}
+
+function alphaStops(q) {
+  return [
+    { p: 0.0, a: 0.0 }, { p: q.q25, a: 0.0 }, { p: q.q50, a: 0.0025 }, { p: q.q75, a: 0.015 },
+    { p: q.q90, a: 0.050 }, { p: q.q95, a: 0.135 }, { p: q.q99, a: 0.35 }, { p: 1.0, a: 0.62 },
+  ];
+}
+
+function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+function clampStopPosition(stops, index, p) {
+  if (index <= 0) return 0;
+  if (index >= stops.length - 1) return 1;
+  const eps = 0.006;
+  return Math.max(stops[index - 1].p + eps, Math.min(stops[index + 1].p - eps, p));
 }
 
 export class TransferFunction {
@@ -80,41 +71,63 @@ export class TransferFunction {
       q25: norm(gp["25"]), q50: norm(gp["50"]), q75: norm(gp["75"]),
       q90: norm(gp["90"]), q95: norm(gp["95"]), q99: norm(gp["99"]), q999: norm(gp["99.9"]),
     };
-    // 透明度锚点(基于分位数): void 透明, filament 上升, node 高
-    this.alphaAnchors = [
-      [0.0, 0.0], [this.q.q25, 0.0], [this.q.q50, 0.012], [this.q.q75, 0.06],
-      [this.q.q90, 0.16], [this.q.q95, 0.30], [this.q.q99, 0.62], [1.0, 0.95],
-    ];
-    this.preset = "cosmic";
     this.data = new Uint8Array(LUT_N * 4);
     this.texture = new DataTexture(this.data, LUT_N, 1, RGBAFormat, UnsignedByteType);
     this.texture.minFilter = this.texture.magFilter = LinearFilter;
     this.texture.wrapS = this.texture.wrapT = ClampToEdgeWrapping;
+    this.setRecommendedStable();
+  }
+
+  setRecommendedStable() {
+    this.colorAnchors = colorStops(this.q).map((s) => ({ p: s.p, c: [...s.c] }));
+    this.alphaAnchors = alphaStops(this.q).map((s) => ({ p: s.p, a: s.a }));
     this.build();
   }
 
-  setPreset(p) { this.preset = p; this.build(); }
+  moveColorStop(index, p) {
+    if (!this.colorAnchors[index]) return;
+    this.colorAnchors[index].p = clampStopPosition(this.colorAnchors, index, clamp01(p));
+    this.build();
+  }
+
+  moveAlphaStop(index, p, a) {
+    if (!this.alphaAnchors[index]) return;
+    this.alphaAnchors[index].p = clampStopPosition(this.alphaAnchors, index, clamp01(p));
+    this.alphaAnchors[index].a = clamp01(a);
+    this.build();
+  }
+
+  setColorStop(index, color) {
+    if (!this.colorAnchors[index]) return;
+    this.colorAnchors[index].c = hexRGB(color);
+    this.build();
+  }
 
   build() {
-    const stops = colorStops(this.preset, this.q);
+    const stops = this.colorAnchors;
+    const anchors = this.alphaAnchors.map((s) => [s.p, s.a]);
     for (let i = 0; i < LUT_N; i++) {
       const x = i / (LUT_N - 1);
       const c = sampleStops(stops, x);
-      const a = sampleAnchors(this.alphaAnchors, x);
+      const a = sampleAnchors(anchors, x);
       this.data[i * 4 + 0] = Math.round(c[0]);
       this.data[i * 4 + 1] = Math.round(c[1]);
       this.data[i * 4 + 2] = Math.round(c[2]);
       this.data[i * 4 + 3] = Math.round(Math.min(1, a) * 255);
     }
     this.texture.needsUpdate = true;
-    this._stops = stops;
   }
 
-  // 返回用于 UI 绘制的渐变 stops (css 颜色 + 位置)
   cssStops() {
-    return this._stops.map((s) => ({
-      p: s.p, color: `rgb(${s.c[0]|0},${s.c[1]|0},${s.c[2]|0})`,
+    return this.colorAnchors.map((s, i) => ({
+      i,
+      p: s.p,
+      color: `rgb(${s.c[0] | 0},${s.c[1] | 0},${s.c[2] | 0})`,
+      hex: rgbHex(s.c),
     }));
   }
-  alphaCurve() { return this.alphaAnchors.map(([p, a]) => ({ p, a })); }
+
+  alphaCurve() {
+    return this.alphaAnchors.map((s, i) => ({ i, p: s.p, a: s.a }));
+  }
 }

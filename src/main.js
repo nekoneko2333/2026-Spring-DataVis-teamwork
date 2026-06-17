@@ -109,25 +109,141 @@ class App {
       <span style="opacity:.7">密度驱动 proxy: τ = A·∫ρ^β ds, F = e^(−τ) (非严格辐射转移)</span>
       <button id="probeClear" class="action" style="padding:4px 10px">清除探针</button>`;
     this._renderTFEditor();
+    this._syncTFControls();
   }
 
   _renderTFEditor() {
     const host = $("#tfEditor");
     host.innerHTML = "";
-    const stops = this.tf.cssStops();
-    const grad = stops.map((s) => `${s.color} ${(s.p * 100).toFixed(1)}%`).join(",");
-    const bar = document.createElement("div");
-    Object.assign(bar.style, { position: "absolute", left: 0, right: 0, bottom: 0, height: "16px", borderRadius: "4px", background: `linear-gradient(90deg, ${grad})` });
-    host.appendChild(bar);
-    const svg = d3.select(host).append("svg").style("width", "100%").style("height", "calc(100% - 18px)");
+    host.classList.add("tf-editor");
+
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.className = "tf-color-input";
+    host.appendChild(colorInput);
+
+    const curve = document.createElement("div");
+    curve.className = "tf-curve";
+    host.appendChild(curve);
+
+    const svg = d3.select(curve).append("svg").attr("class", "tf-svg").style("width", "100%").style("height", "100%");
+    const grad = document.createElement("div");
+    grad.className = "tf-gradient";
+    host.appendChild(grad);
+
+    const colorStopsLayer = document.createElement("div");
+    colorStopsLayer.className = "tf-color-stops";
+    grad.appendChild(colorStopsLayer);
+
     const r = host.getBoundingClientRect();
-    const w = r.width, h = Math.max(40, r.height - 18);
+    const w = Math.max(140, r.width);
+    const h = Math.max(54, (r.height || 92) - 28);
     const x = d3.scaleLinear().domain([0, 1]).range([0, w]);
-    const y = d3.scaleLinear().domain([0, 1]).range([h, 4]);
-    const ac = this.tf.alphaCurve();
+    const y = d3.scaleLinear().domain([0, 1]).range([h - 6, 6]);
+
+    const g = svg.append("g");
+    const gridVals = [0, 0.25, 0.5, 0.75, 1];
+    g.selectAll("line.tf-grid").data(gridVals).join("line")
+      .attr("class", "tf-gridline")
+      .attr("x1", (d) => x(d)).attr("x2", (d) => x(d))
+      .attr("y1", 0).attr("y2", h);
+    g.append("text").attr("class", "tf-label").attr("x", 4).attr("y", 12).text("alpha");
+
+    const areaPath = g.append("path").attr("class", "tf-area");
+    const linePath = g.append("path").attr("class", "tf-line");
+    const alphaGroup = g.append("g");
     const area = d3.area().x((d) => x(d.p)).y0(h).y1((d) => y(d.a)).curve(d3.curveMonotoneX);
-    svg.append("path").attr("d", area(ac)).attr("fill", "rgba(13,140,138,0.16)").attr("stroke", "#0d8c8a").attr("stroke-width", 1.4);
-    svg.append("text").attr("x", 4).attr("y", 12).attr("fill", "#5d6b86").attr("font-size", 9).text("不透明度 ↑");
+    const line = d3.line().x((d) => x(d.p)).y((d) => y(d.a)).curve(d3.curveMonotoneX);
+
+    const refresh = () => {
+      const stops = this.tf.cssStops();
+      const alpha = this.tf.alphaCurve();
+      grad.style.background = `linear-gradient(90deg, ${stops.map((s) => `${s.color} ${(s.p * 100).toFixed(1)}%`).join(",")})`;
+      areaPath.attr("d", area(alpha));
+      linePath.attr("d", line(alpha));
+
+      alphaGroup.selectAll("circle").data(alpha, (d) => d.i).join("circle")
+        .attr("class", "tf-alpha-stop")
+        .attr("cx", (d) => x(d.p))
+        .attr("cy", (d) => y(d.a))
+        .attr("r", 5)
+        .call(d3.drag().on("drag", (ev, d) => {
+          const p = Math.max(0, Math.min(1, x.invert(ev.x)));
+          const a = Math.max(0, Math.min(1, y.invert(ev.y)));
+          this.tf.moveAlphaStop(d.i, p, a);
+          this._refreshTFViews();
+          refresh();
+        }));
+
+      colorStopsLayer.innerHTML = "";
+      stops.forEach((stop) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "tf-color-stop";
+        btn.style.left = `${x(stop.p)}px`;
+        btn.style.background = stop.color;
+        let moved = false;
+
+        btn.addEventListener("pointerdown", (ev) => {
+          ev.preventDefault();
+          moved = false;
+          const onMove = (mv) => {
+            moved = true;
+            const rect = grad.getBoundingClientRect();
+            const p = Math.max(0, Math.min(1, (mv.clientX - rect.left) / rect.width));
+            this.tf.moveColorStop(stop.i, p);
+            this._refreshTFViews();
+            refresh();
+          };
+          const onUp = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+          };
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp, { once: true });
+        });
+
+        btn.addEventListener("click", () => {
+          if (moved) return;
+          colorInput.value = stop.hex;
+          colorInput.oninput = (e) => {
+            this.tf.setColorStop(stop.i, e.target.value);
+            this._refreshTFViews();
+            refresh();
+          };
+          colorInput.click();
+        });
+
+        colorStopsLayer.appendChild(btn);
+      });
+    };
+
+    refresh();
+  }
+
+  _refreshTFViews() {
+    this.histogram._recolor();
+  }
+
+  _syncTFControls() {
+    $("#densityScale").value = String(state.tf.densityScale);
+    $("#stepQuality").value = String(state.tf.steps);
+    $("#isoValue").value = String(state.tf.isoValue);
+  }
+
+  _applyRecommendedTF() {
+    state.tf.densityScale = 0.80;
+    state.tf.steps = 256;
+    state.tf.isoValue = 0.40;
+
+    this.tf.setRecommendedStable();
+    this.renderer.setDensityScale(state.tf.densityScale);
+    this.renderer.setSteps(state.playing ? Math.min(state.tf.steps, this.playbackSteps) : state.tf.steps);
+    this.renderer.setIso(state.tf.isoValue);
+
+    this._syncTFControls();
+    this._refreshTFViews();
+    this._renderTFEditor();
   }
 
   // ---------------- events ----------------
@@ -150,15 +266,20 @@ class App {
       this._quickBrush(b.dataset.brush, b);
     });
 
-    $("#tfPresets").addEventListener("click", (e) => {
-      const b = e.target.closest("button"); if (!b) return;
-      $("#tfPresets .active")?.classList.remove("active"); b.classList.add("active");
-      this.tf.setPreset(b.dataset.preset); this.histogram._recolor(); this._renderTFEditor();
-    });
+    $("#tfRecommend").addEventListener("click", () => this._applyRecommendedTF());
 
-    $("#densityScale").addEventListener("input", (e) => this.renderer.setDensityScale(+e.target.value));
-    $("#stepQuality").addEventListener("input", (e) => { state.tf.steps = +e.target.value; if (!state.playing) this.renderer.setSteps(state.tf.steps); });
-    $("#isoValue").addEventListener("input", (e) => this.renderer.setIso(+e.target.value));
+    $("#densityScale").addEventListener("input", (e) => {
+      state.tf.densityScale = +e.target.value;
+      this.renderer.setDensityScale(state.tf.densityScale);
+    });
+    $("#stepQuality").addEventListener("input", (e) => {
+      state.tf.steps = +e.target.value;
+      this.renderer.setSteps(state.playing ? Math.min(state.tf.steps, this.playbackSteps) : state.tf.steps);
+    });
+    $("#isoValue").addEventListener("input", (e) => {
+      state.tf.isoValue = +e.target.value;
+      this.renderer.setIso(state.tf.isoValue);
+    });
 
     // atlas
     $("#btnAtlas").addEventListener("click", () => this._toggleAtlas());
@@ -228,6 +349,10 @@ class App {
 
     // 低分辨率即时显示
     this.renderer.setVolumeTexture(this.dm.getPreviewTexture(step));
+    {
+      const previewGrad = this.dm.getPreviewGradientTexture(step);
+      this.renderer.setGradientTexture(previewGrad.texture, previewGrad.scale);
+    }
     $("#loadState").textContent = fromPlayback ? "○ 预览(播放)" : "○ 预览";
 
     // 预取
@@ -239,8 +364,9 @@ class App {
       if (state.atlas.active) this._scheduleLabel(step);
     }
     if (force) {
-      const tex = await this.dm.getVolumeTexture(step);
-      this.renderer.setVolumeTexture(tex);
+      const entry = await this.dm.getVolumeSet(step);
+      this.renderer.setVolumeTexture(entry.volumeTex);
+      this.renderer.setGradientTexture(entry.gradientTex, entry.gradientScale);
       $("#loadState").textContent = "● 全分辨率";
     }
   }
@@ -249,9 +375,10 @@ class App {
     clearTimeout(this.fullResTimer);
     this.fullResTimer = setTimeout(async () => {
       try {
-        const tex = await this.dm.getVolumeTexture(step);
+        const entry = await this.dm.getVolumeSet(step);
         if (state.step === step && !state.playing) {
-          this.renderer.setVolumeTexture(tex);
+          this.renderer.setVolumeTexture(entry.volumeTex);
+          this.renderer.setGradientTexture(entry.gradientTex, entry.gradientScale);
           $("#loadState").textContent = "● 全分辨率";
           // 全分辨率到位后: 选区统计升级为精确值; 探针用全分辨率重采
           if (state.brush.active) this._updateSelStats(step);

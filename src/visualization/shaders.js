@@ -19,6 +19,7 @@ in vec3 vWorldPos;
 out vec4 outColor;
 
 uniform sampler3D uVolume;
+uniform sampler3D uGradient;
 uniform sampler3D uLabel;
 uniform sampler2D uTF;
 
@@ -32,7 +33,7 @@ uniform float uLoClip;        // void 阈值
 uniform bool  uBrushActive;
 uniform float uBrushMin;
 uniform float uBrushMax;
-uniform float uGradEps;
+uniform float uGradScale;
 uniform vec3  uLightDir;
 uniform float uTime;
 
@@ -42,7 +43,13 @@ uniform vec3  uClassOn;        // sheet, filament, node 开关(1/0)
 
 const vec3 BMIN = vec3(-0.5);
 const vec3 BMAX = vec3(0.5);
-const int  MAX_STEPS = 512;
+const int  MAX_STEPS = 1024;
+const int  SHADOW_STEPS = 6;
+const float TF_BIN = 1.0 / 255.0;
+const float ADAPTIVE_MIN_SCALE = 0.5;
+const float ADAPTIVE_MAX_SCALE = 1.75;
+const float SHADOW_STEP_SCALE = 3.0;
+const float SHADOW_DENSITY_SCALE = 1.15;
 
 vec2 intersectBox(vec3 ro, vec3 rd) {
   vec3 inv = 1.0 / rd;
@@ -58,14 +65,48 @@ vec2 intersectBox(vec3 ro, vec3 rd) {
 float sampleVol(vec3 uvw) { return texture(uVolume, uvw).r; }
 
 vec3 gradient(vec3 uvw) {
-  float e = uGradEps;
-  float dx = texture(uVolume, uvw + vec3(e,0,0)).r - texture(uVolume, uvw - vec3(e,0,0)).r;
-  float dy = texture(uVolume, uvw + vec3(0,e,0)).r - texture(uVolume, uvw - vec3(0,e,0)).r;
-  float dz = texture(uVolume, uvw + vec3(0,0,e)).r - texture(uVolume, uvw - vec3(0,0,e)).r;
-  return vec3(dx, dy, dz);
+  return (texture(uGradient, uvw).xyz * (255.0 / 127.0) - 1.0) * uGradScale;
 }
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
+
+float adaptiveStep(float baseDt, float sampleAlpha, vec3 grad, vec3 rayDir) {
+  float predictedDelta = abs(dot(grad, rayDir)) * baseDt;
+  float variationTerm = smoothstep(2.0 * TF_BIN, 10.0 * TF_BIN, predictedDelta);
+  float opacityTerm = clamp(sampleAlpha * uDensityScale, 0.0, 1.0);
+  float refine = max(variationTerm, opacityTerm);
+  return baseDt * mix(ADAPTIVE_MAX_SCALE, ADAPTIVE_MIN_SCALE, refine);
+}
+
+float shadowTransmittance(vec3 pos, float stepLen, vec3 lightDir) {
+  vec2 lightHit = intersectBox(pos + lightDir * 1e-3, lightDir);
+  float tLightEnd = lightHit.y;
+  if (tLightEnd <= 0.0) return 1.0;
+
+  float shadowDt = stepLen * SHADOW_STEP_SCALE;
+  float tShadow = shadowDt;
+  float trans = 1.0;
+
+  for (int j = 0; j < SHADOW_STEPS; j++) {
+    if (tShadow >= tLightEnd || trans <= 0.03) break;
+    vec3 shadowPos = pos + lightDir * tShadow;
+    vec3 shadowUVW = shadowPos + 0.5;
+    float shadowDensity = sampleVol(shadowUVW);
+    float shadowAlpha = texture(uTF, vec2(shadowDensity, 0.5)).a;
+    if (shadowAlpha <= 0.003) {
+      tShadow += shadowDt;
+      continue;
+    }
+    float stepAlpha = 1.0 - pow(
+      1.0 - clamp(shadowAlpha * uDensityScale * SHADOW_DENSITY_SCALE, 0.0, 1.0),
+      shadowDt * 256.0
+    );
+    trans *= (1.0 - stepAlpha);
+    tShadow += shadowDt;
+  }
+
+  return clamp(trans, 0.0, 1.0);
+}
 
 // 形态学类别颜色
 vec3 classColor(int c) {
@@ -87,6 +128,9 @@ void main() {
   float dt = (tEnd - tStart) / steps;
   float jitter = hash(gl_FragCoord.xy) * dt;
   float t = tStart + jitter;
+  float maxIter = (uMode == 0)
+    ? min(float(MAX_STEPS), ceil(steps / ADAPTIVE_MIN_SCALE))
+    : min(float(MAX_STEPS), steps);
 
   vec3 L = normalize(uLightDir);
   vec3 col = vec3(0.0);
@@ -94,7 +138,7 @@ void main() {
   float maxd = 0.0;
 
   for (int i = 0; i < MAX_STEPS; i++) {
-    if (float(i) >= steps || alpha > 0.992) break;
+    if (float(i) >= maxIter || t >= tEnd || alpha > 0.992) break;
     vec3 pos = ro + rd * t;
     vec3 uvw = pos + 0.5;
     float d = sampleVol(uvw);
@@ -154,31 +198,50 @@ void main() {
     if (uBrushActive && (d < uBrushMin || d > uBrushMax)) gate = 0.0;
     vec4 src = texture(uTF, vec2(d, 0.5));
 
-    vec3 N = normalize(-gradient(uvw) + 1e-6);
+    vec3 grad = gradient(uvw);
+    vec3 N = normalize(-grad + vec3(1e-6));
     vec3 V = normalize(uCameraPos - pos);
     vec3 H = normalize(L + V);
     float diff = clamp(dot(N, L), 0.0, 1.0);
-    float spec = pow(clamp(dot(N, H), 0.0, 1.0), 28.0);
-    vec3 lit = src.rgb * (0.32 + 0.85 * diff) + vec3(0.85, 0.92, 1.0) * spec * 0.35 * src.a;
+    float spec = pow(clamp(dot(N, H), 0.0, 1.0), 34.0);
+    int atlasClass = 0;
+    vec3 atlasColor = vec3(0.0);
+    bool atlasOn = false;
+    float atlasBoost = 0.0;
 
     if (uAtlasActive) {
-      int c = int(texture(uLabel, uvw).r + 0.5);
-      vec3 cc = classColor(c);
-      bool on = true; float boost = 0.0;
-      if (c == 1) { on = uClassOn.x > 0.5; boost = 0.2; }
-      else if (c == 2) { on = uClassOn.y > 0.5; boost = 0.8; }
-      else if (c == 3) { on = uClassOn.z > 0.5; boost = 1.6; }
-      if (c >= 1) {
-        if (on) { lit = mix(lit, cc * (0.5 + 0.8 * diff), uAtlasOpacity); src.a *= (1.0 + boost); }
+      atlasClass = int(texture(uLabel, uvw).r + 0.5);
+      atlasColor = classColor(atlasClass);
+      atlasOn = true;
+      if (atlasClass == 1) { atlasOn = uClassOn.x > 0.5; atlasBoost = 0.2; }
+      else if (atlasClass == 2) { atlasOn = uClassOn.y > 0.5; atlasBoost = 0.8; }
+      else if (atlasClass == 3) { atlasOn = uClassOn.z > 0.5; atlasBoost = 1.6; }
+      if (atlasClass >= 1) {
+        if (atlasOn) { src.a *= (1.0 + atlasBoost); }
         else { src.a *= 0.03; }
       }
     }
 
-    float a = 1.0 - pow(1.0 - clamp(src.a * uDensityScale, 0.0, 1.0), dt * 256.0);
+    float stepLen = min(adaptiveStep(dt, src.a, grad, rd), tEnd - t);
+    float sampleOpacity = clamp(src.a * uDensityScale, 0.0, 1.0);
+    float shadow = 1.0;
+    if (gate > 0.0 && sampleOpacity > 0.03 && max(diff, spec * src.a) > 0.02) {
+      shadow = shadowTransmittance(pos, stepLen, L);
+    }
+
+    vec3 ambient = src.rgb * 0.16;
+    vec3 direct = src.rgb * (0.64 * diff);
+    vec3 highlight = vec3(0.98, 0.93, 0.82) * spec * 0.16 * src.a;
+    vec3 lit = ambient + shadow * (direct + highlight);
+    if (uAtlasActive && atlasClass >= 1 && atlasOn) {
+      lit = mix(lit, atlasColor * (0.20 + shadow * (0.35 + 0.65 * diff)), uAtlasOpacity);
+    }
+
+    float a = 1.0 - pow(1.0 - sampleOpacity, stepLen * 256.0);
     a *= gate;
     col += (1.0 - alpha) * a * lit;
     alpha += (1.0 - alpha) * a;
-    t += dt;
+    t += stepLen;
   }
 
   if (uMode == 1) {
