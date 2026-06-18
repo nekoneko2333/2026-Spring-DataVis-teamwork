@@ -7,7 +7,8 @@ export class PowerSpectrum {
     this.el = el; this.power = power;
     this.k = power.k; this.M = power.matrix; this.N = this.M.length;
     this.margin = { top: 12, right: 16, bottom: 28, left: 50 };
-    this.color = d3.scaleSequential(d3.interpolateRgbBasis(["#2563eb", "#0d8c8a", "#c06a09"])).domain([0, this.N - 1]);
+    this.colors = ["#355fba", "#7d8cff", "#b04f78"];
+    this.color = d3.scaleSequential(d3.interpolateRgbBasis(this.colors)).domain([0, this.N - 1]);
     this._build();
   }
 
@@ -43,6 +44,13 @@ export class PowerSpectrum {
 
   _line() {
     return d3.line().defined((d) => d[1] > 0).x((d) => this.x(d[0])).y((d) => this.y(d[1])).curve(d3.curveMonotoneX);
+  }
+
+  setTheme(theme) {
+    this.colors = theme.power;
+    this.color = d3.scaleSequential(d3.interpolateRgbBasis(this.colors)).domain([0, this.N - 1]);
+    this._drawFaint();
+    if (this._step != null) this.update(this._step);
   }
   _pts(step) { return this.k.map((kk, i) => [kk, this.M[step][i]]); }
 

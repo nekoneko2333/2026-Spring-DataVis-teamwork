@@ -1,6 +1,6 @@
-// Cosmic Probe 面板 (创新点 A+D): 沿探针视线的
-//  ① log-density 剖面曲线;  ② 莱曼-α proxy 吸收谱 (透射流量 F=exp(-τ), τ=A·∫ρ^β ds)。
-// 物理限定: 仅密度驱动的教学/可视分析近似, 非严格辐射转移。
+﻿// Cosmic Probe 闈㈡澘 (鍒涙柊鐐?A+D): 娌挎帰閽堣绾跨殑
+//  鈶?log-density 鍓栭潰鏇茬嚎;  鈶?鑾辨浖-伪 proxy 鍚告敹璋?(閫忓皠娴侀噺 F=exp(-蟿), 蟿=A路鈭乛尾 ds)銆?
+// 鐗╃悊闄愬畾: 浠呭瘑搴﹂┍鍔ㄧ殑鏁欏/鍙鍒嗘瀽杩戜技, 闈炰弗鏍艰緪灏勮浆绉汇€?
 import * as d3 from "d3";
 
 export class ProbePanel {
@@ -8,6 +8,12 @@ export class ProbePanel {
     this.el = el; this.meta = meta;
     this.margin = { top: 14, right: 50, bottom: 24, left: 50 };
     this.samples = null; this.A = 0.55; this.beta = 1.6;
+    this.colors = {
+      density: "#7d8cff",
+      densityFill: "rgba(125,140,255,0.16)",
+      flux: "#c8688c",
+      fluxFill: "rgba(200,104,140,0.13)",
+    };
     this._build();
   }
 
@@ -17,12 +23,12 @@ export class ProbePanel {
     this.gx = this.g.append("g").attr("class", "axis");
     this.gyL = this.g.append("g").attr("class", "axis");
     this.gyR = this.g.append("g").attr("class", "axis");
-    this.areaDens = this.g.append("path").attr("fill", "rgba(13,140,138,0.16)").attr("stroke", "#0d8c8a").attr("stroke-width", 1.6);
-    this.fluxArea = this.g.append("path").attr("fill", "rgba(217,119,6,0.12)");
-    this.fluxLine = this.g.append("path").attr("fill", "none").attr("stroke", "#d97706").attr("stroke-width", 1.8);
-    this.lxd = this.g.append("text").attr("fill", "#0d8c8a").attr("font-size", 10).text("log10 ρ");
-    this.lxf = this.g.append("text").attr("fill", "#c06a09").attr("font-size", 10).attr("text-anchor", "end").text("透射流量 F");
-    this.lpos = this.g.append("text").attr("fill", "#5d6b86").attr("font-size", 10).attr("text-anchor", "end").text("沿视线位置 →");
+    this.areaDens = this.g.append("path").attr("fill", this.colors.densityFill).attr("stroke", this.colors.density).attr("stroke-width", 1.6);
+    this.fluxArea = this.g.append("path").attr("fill", this.colors.fluxFill);
+    this.fluxLine = this.g.append("path").attr("fill", "none").attr("stroke", this.colors.flux).attr("stroke-width", 1.8);
+    this.lxd = this.g.append("text").attr("fill", this.colors.density).attr("font-size", 10).text("log10 rho");
+    this.lxf = this.g.append("text").attr("fill", this.colors.flux).attr("font-size", 10).attr("text-anchor", "end").text("Flux F");
+    this.lpos = this.g.append("text").attr("fill", "#5d6b86").attr("font-size", 10).attr("text-anchor", "end").text("line position ->");
     this.srcNote = this.g.append("text").attr("fill", "#5d6b86").attr("font-size", 9).attr("x", 2).attr("y", -2);
     this.empty = this.g.append("text").attr("fill", "#5d6b86").attr("font-size", 12);
     this.x = d3.scaleLinear().domain([0, 1]);
@@ -33,6 +39,14 @@ export class ProbePanel {
 
   setParams(A, beta) { this.A = A; this.beta = beta; this._draw(); }
   setSamples(normSamples, full) { this.samples = normSamples; this.full = full; this._draw(); }
+  setTheme(theme) {
+    this.colors = theme.probe;
+    this.areaDens.attr("fill", this.colors.densityFill).attr("stroke", this.colors.density);
+    this.fluxArea.attr("fill", this.colors.fluxFill);
+    this.fluxLine.attr("stroke", this.colors.flux);
+    this.lxd.attr("fill", this.colors.density);
+    this.lxf.attr("fill", this.colors.flux);
+  }
 
   _resize() {
     const r = this.el.getBoundingClientRect();
@@ -52,13 +66,13 @@ export class ProbePanel {
 
   _draw() {
     if (!this.samples) {
-      this.empty.text("在 3D 视图中点击拉出探针视线…");
+      this.empty.text("Click in the 3D view to create a probe line");
       this.srcNote.text("");
       this.areaDens.attr("d", null); this.fluxLine.attr("d", null); this.fluxArea.attr("d", null);
       return;
     }
     this.empty.text("");
-    this.srcNote.text(this.full ? "采样: 全分辨率 128³" : "采样: 64³ 预览(平滑, 停稳后自动升采样)");
+    this.srcNote.text(this.full ? "sample: full resolution 128^3" : "sample: 64^3 preview");
     const { globalLogMin, globalLogMax } = this.meta;
     const q50 = this.meta.globalPercentiles["50"];
     const n = this.samples.length;
@@ -67,10 +81,10 @@ export class ProbePanel {
     for (let i = 0; i < n; i++) {
       const ld = globalLogMin + this.samples[i] * (globalLogMax - globalLogMin);
       logD[i] = ld;
-      const rhoRel = Math.pow(10, ld - q50);     // 相对密度(中位数=1)
+      const rhoRel = Math.pow(10, ld - q50);     // 鐩稿瀵嗗害(涓綅鏁?1)
       rhoB[i] = Math.pow(rhoRel, this.beta);
     }
-    // 视线积分(小高斯核近似热展宽), 得到光学深度 τ -> F=exp(-τ)
+    // 瑙嗙嚎绉垎(灏忛珮鏂牳杩戜技鐑睍瀹?, 寰楀埌鍏夊娣卞害 蟿 -> F=exp(-蟿)
     const tau = this._smooth(rhoB, 2).map((v) => this.A * v);
     const F = tau.map((t) => Math.exp(-t));
 

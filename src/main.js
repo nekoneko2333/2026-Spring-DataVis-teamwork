@@ -10,6 +10,7 @@ import { TimeSeries } from "./charts/TimeSeries.js";
 import { PowerSpectrum } from "./charts/PowerSpectrum.js";
 import { Timeline } from "./charts/Timeline.js";
 import { ProbePanel } from "./charts/ProbePanel.js";
+import { DEFAULT_THEME, THEME_ORDER, THEMES } from "./themes.js";
 
 const $ = (s) => document.querySelector(s);
 const TOTAL_VOX = 128 * 128 * 128;
@@ -22,8 +23,11 @@ class App {
     this.labelTimer = null;
     this.lastStepTime = 0;
     this.stepInterval = 78; // ms, ≈13 步/s 播放
-    this.playbackSteps = 110; // 播放时降低 ray-march 步进数(弱机更流畅)
+    this.playbackSteps = 88; // 播放时降低 ray-march 步进数(弱机更流畅)
     this.tabCharts = {};
+    this.page = "render";
+    this.themeName = DEFAULT_THEME;
+    this.theme = THEMES[this.themeName];
   }
 
   async start() {
@@ -42,6 +46,8 @@ class App {
     this._buildCharts();
     this._buildUI();
     this._bindEvents();
+    this._applyTheme(this.themeName);
+    this._setPage("render");
 
     await this.applyStep(0, { force: true });
     this._setView(0);
@@ -56,12 +62,12 @@ class App {
     this.histogram.setTF(this.tf);
     this.fingerprint = new Fingerprint($("#fingerprintChart"), meta, histograms);
     this.series = new TimeSeries($("#seriesChart"), [
-      { key: "gini", label: "Gini", color: "#d97706", values: stats.steps.map((s) => s.gini) },
-      { key: "entropy", label: "熵", color: "#0d8c8a", values: stats.steps.map((s) => s.entropy) },
-      { key: "variance", label: "方差", color: "#6d5ef0", values: stats.steps.map((s) => s.variance) },
-      { key: "kurtosis", label: "峰度", color: "#db2777", values: stats.steps.map((s) => s.kurtosis) },
-      { key: "skewness", label: "偏度", color: "#2e9e4f", values: stats.steps.map((s) => s.skewness) },
-      { key: "maxlog", label: "max logρ", color: "#e8590c", values: stats.steps.map((s) => s.max) },
+      { key: "gini", label: "Gini", color: this.theme.series.gini, values: stats.steps.map((s) => s.gini) },
+      { key: "entropy", label: "熵", color: this.theme.series.entropy, values: stats.steps.map((s) => s.entropy) },
+      { key: "variance", label: "方差", color: this.theme.series.variance, values: stats.steps.map((s) => s.variance) },
+      { key: "kurtosis", label: "峰度", color: this.theme.series.kurtosis, values: stats.steps.map((s) => s.kurtosis) },
+      { key: "skewness", label: "偏度", color: this.theme.series.skewness, values: stats.steps.map((s) => s.skewness) },
+      { key: "maxlog", label: "max logρ", color: this.theme.series.maxlog, values: stats.steps.map((s) => s.max) },
     ]);
     this.power = new PowerSpectrum($("#powerChart"), power);
     this.timeline = new Timeline($("#timelineChart"), stats, morphology, (s) => this.setStep(s));
@@ -76,7 +82,7 @@ class App {
   _buildUI() {
     // 时间轴 legend
     $("#timelineLegend").innerHTML =
-      `<span style="color:#2563eb">早期(低Gini)</span><span style="color:#c06a09">晚期(高Gini)</span><span style="color:#5d6b86">大小=高密度占比</span>`;
+      this._timelineLegendHTML();
     // 统计格
     this.statKeys = [
       ["max", "max log ρ", "gold"], ["mean", "mean", ""], ["std", "std", ""], ["median", "median", ""],
@@ -85,7 +91,7 @@ class App {
     $("#statGrid").innerHTML = this.statKeys.map(([k, lbl, cls]) =>
       `<div class="stat-cell"><div class="k">${lbl}</div><div class="v ${cls}" id="stat-${k}">—</div></div>`).join("");
     // 形态学 bars
-    this.morphClasses = [["void", "空洞", "#46568a"], ["sheet", "墙", "#2f74e0"], ["filament", "丝", "#0ea5a3"], ["node", "节点", "#d68a06"]];
+    this.morphClasses = this._morphClasses();
     $("#morphBars").innerHTML = this.morphClasses.map(([k, lbl, c]) =>
       `<div class="morph-row"><span class="name">${lbl}</span><div class="bar"><div id="morph-${k}" style="background:${c}"></div></div><span class="pct" id="morphpct-${k}">—</span></div>`).join("");
     // atlas 控制
@@ -95,21 +101,68 @@ class App {
         <button data-method="proxy">density-Hessian</button>
       </div>
       <div class="toggle-row" id="clsToggles">
-        <div class="cls-toggle" data-cls="sheet"><span class="sw" style="background:#2f74e0"></span>墙</div>
-        <div class="cls-toggle" data-cls="filament"><span class="sw" style="background:#0ea5a3"></span>丝</div>
-        <div class="cls-toggle" data-cls="node"><span class="sw" style="background:#d68a06"></span>节点</div>
+        <div class="cls-toggle" data-cls="sheet"><span class="sw" style="background:${this.theme.morph.sheet}"></span>墙</div>
+        <div class="cls-toggle" data-cls="filament"><span class="sw" style="background:${this.theme.morph.filament}"></span>丝</div>
+        <div class="cls-toggle" data-cls="node"><span class="sw" style="background:${this.theme.morph.node}"></span>节点</div>
       </div>
-      <label>叠加强度 <input type="range" id="atlasOpacity" min="0.1" max="0.95" step="0.05" value="0.55"></label>
-      <div id="methodNote" style="font-size:10px;opacity:.7"></div>`;
-    this._updateMethodNote();
+      <label>叠加强度 <input type="range" id="atlasOpacity" min="0.1" max="0.95" step="0.05" value="0.55"></label>`;
     // probe 控制
     $("#probeControls").innerHTML = `
       <label>A <input type="range" id="probeA" min="0.05" max="2" step="0.05" value="0.55"><span id="probeAv">0.55</span></label>
       <label>β <input type="range" id="probeBeta" min="0.6" max="3" step="0.1" value="1.6"><span id="probeBv">1.6</span></label>
-      <span style="opacity:.7">密度驱动 proxy: τ = A·∫ρ^β ds, F = e^(−τ) (非严格辐射转移)</span>
       <button id="probeClear" class="action" style="padding:4px 10px">清除探针</button>`;
     this._renderTFEditor();
     this._syncTFControls();
+  }
+
+  _timelineLegendHTML() {
+    return `<span style="color:${this.theme.timeline.early}">早期(低Gini)</span><span style="color:${this.theme.timeline.legendLate}">晚期(高Gini)</span><span style="color:#5d6b86">大小=高密度占比</span>`;
+  }
+
+  _morphClasses() {
+    return [
+      ["void", "空洞", this.theme.morph.void],
+      ["sheet", "墙", this.theme.morph.sheet],
+      ["filament", "丝", this.theme.morph.filament],
+      ["node", "节点", this.theme.morph.node],
+    ];
+  }
+
+  _applyTheme(name) {
+    this.themeName = name;
+    this.theme = THEMES[name];
+    $("#app").dataset.theme = name;
+    const btn = $("#themeToggle");
+    if (btn) btn.textContent = this.theme.label;
+
+    if (this.tf) {
+      this.tf.setTheme(this.theme);
+      this.renderer.setTF(this.tf.texture);
+      this._refreshTFViews();
+      this._renderTFEditor();
+    }
+    if (this.renderer) this.renderer.setTheme(this.theme);
+    if (this.timeline) this.timeline.setTheme(this.theme);
+    if (this.fingerprint) this.fingerprint.setTheme(this.theme);
+    if (this.power) this.power.setTheme(this.theme);
+    if (this.probe) this.probe.setTheme(this.theme);
+    if (this.series) this.series.setTheme(this.theme);
+
+    $("#timelineLegend").innerHTML = this._timelineLegendHTML();
+    this.morphClasses = this._morphClasses();
+    for (const [k, , color] of this.morphClasses) {
+      const bar = $(`#morph-${k}`);
+      if (bar) bar.style.background = color;
+    }
+    for (const cls of ["sheet", "filament", "node"]) {
+      const sw = document.querySelector(`.cls-toggle[data-cls="${cls}"] .sw`);
+      if (sw) sw.style.background = this.theme.morph[cls];
+    }
+  }
+
+  _toggleTheme() {
+    const i = THEME_ORDER.indexOf(this.themeName);
+    this._applyTheme(THEME_ORDER[(i + 1) % THEME_ORDER.length]);
   }
 
   _renderTFEditor() {
@@ -236,7 +289,7 @@ class App {
     state.tf.steps = 256;
     state.tf.isoValue = 0.40;
 
-    this.tf.setRecommendedStable();
+    this.tf.setRecommendedStable(this.theme);
     this.renderer.setDensityScale(state.tf.densityScale);
     this.renderer.setSteps(state.playing ? Math.min(state.tf.steps, this.playbackSteps) : state.tf.steps);
     this.renderer.setIso(state.tf.isoValue);
@@ -248,6 +301,13 @@ class App {
 
   // ---------------- events ----------------
   _bindEvents() {
+    $("#themeToggle").addEventListener("click", () => this._toggleTheme());
+
+    $("#pageTabs").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      this._setPage(b.dataset.page);
+    });
+
     $("#timeSlider").addEventListener("input", (e) => { this.pause(); this.setStep(+e.target.value); });
     $("#btnPlay").addEventListener("click", () => this.togglePlay());
 
@@ -287,19 +347,18 @@ class App {
       const t = e.target.closest(".cls-toggle"); if (!t) return;
       const c = t.dataset.cls; state.atlas.classes[c] = !state.atlas.classes[c];
       t.classList.toggle("off", !state.atlas.classes[c]);
-      this.renderer.setAtlas(state.atlas.active, state.atlas.opacity, state.atlas.classes);
+      this._activateAtlasFromControls();
     });
     $("#atlasOpacity").addEventListener("input", (e) => {
       state.atlas.opacity = +e.target.value;
-      this.renderer.setAtlas(state.atlas.active, state.atlas.opacity, state.atlas.classes);
+      this._activateAtlasFromControls();
     });
     $("#methodSwitch").addEventListener("click", (e) => {
       const b = e.target.closest("button"); if (!b) return;
       state.atlas.method = b.dataset.method;
       document.querySelectorAll("#methodSwitch button").forEach((x) => x.classList.toggle("active", x === b));
-      this._updateMethodNote();
       this._updateMorph(state.step);
-      if (state.atlas.active) this._scheduleLabel(state.step);
+      this._activateAtlasFromControls();
     });
 
     // probe
@@ -329,9 +388,29 @@ class App {
   }
 
   _resizeAll() {
-    this.renderer._resize();
+    if ($("#center") && getComputedStyle($("#center")).display !== "none") this.renderer._resize();
     this.histogram.resize(); this.timeline.resize(); this._renderTFEditor();
     const c = this.tabCharts[this._tab || "hist"]; if (c) c.forEach((ch) => ch.resize());
+  }
+
+  _setPage(page) {
+    const pages = new Set(["render", "stats", "brush", "web"]);
+    if (!pages.has(page)) page = "render";
+    this.page = page;
+    $("#app").dataset.page = page;
+    if (this.renderer) this.renderer.setActive(page !== "stats");
+    document.querySelectorAll("#pageTabs button").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
+
+    const preferredTab = {
+      render: this._tab || "hist",
+      stats: this._tab && this._tab !== "probe" ? this._tab : "fingerprint",
+      brush: this._tab === "probe" ? "probe" : "hist",
+      web: this._tab === "power" ? "power" : "series",
+    }[page];
+    this._setTab(preferredTab);
+
+    requestAnimationFrame(() => this._resizeAll());
+    setTimeout(() => this._resizeAll(), 80);
   }
 
   // ---------------- step / playback ----------------
@@ -356,7 +435,7 @@ class App {
     $("#loadState").textContent = fromPlayback ? "○ 预览(播放)" : "○ 预览";
 
     // 预取
-    this.dm.prefetch(step, this._dir || 1, fromPlayback ? 2 : 3);
+    if (!fromPlayback) this.dm.prefetch(step, this._dir || 1, 2);
 
     if (state.renderMode === 5) this._scheduleMesh(step);
     if (!fromPlayback) {
@@ -415,13 +494,6 @@ class App {
         }
       } catch (e) {}
     }, 120);
-  }
-
-  _updateMethodNote() {
-    const el = $("#methodNote"); if (!el) return;
-    el.textContent = state.atlas.method === "tweb"
-      ? "严格 T-web: 解 Poisson 求势场潮汐张量特征值分类 (Hahn2007/Forero-Romero2009)"
-      : "smoothed log-density Hessian 形态学近似 (非严格 T-web)";
   }
 
   setStep(step, opts = {}) {
@@ -527,6 +599,13 @@ class App {
     }
   }
 
+  _activateAtlasFromControls() {
+    state.atlas.active = true;
+    $("#btnAtlas").classList.add("active");
+    this.renderer.setAtlas(true, state.atlas.opacity, state.atlas.classes);
+    this._scheduleLabel(state.step);
+  }
+
   _toggleProbe(force) {
     const on = force != null ? force : !state.probe.active;
     state.probe.active = on;
@@ -534,6 +613,7 @@ class App {
     $("#probeHint").classList.toggle("hidden", !on);
     if (on) {
       this.renderer.enablePicking((line) => this._onProbe(line));
+      this._setPage("brush");
       this._setTab("probe");
     } else {
       this.renderer.disablePicking();

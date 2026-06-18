@@ -3,48 +3,58 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Nyx Cosmic Explorer — 宇宙学体数据可视分析</title>
+    <title>Nyx Cosmic Explorer - 宇宙学体数据可视分析</title>
   </head>
   <body>
-    <div id="app">
-      <!-- 顶栏 -->
+    <div id="app" data-page="render">
       <header id="topbar">
         <div class="brand">
-          <span class="logo">◐</span>
+          <div class="logo">N</div>
           <div class="titles">
-            <h1>NYX COSMIC EXPLORER</h1>
-            <p>宇宙学气体密度场 · 三维体渲染 · 相空间刷选联动</p>
+            <h1>Nyx Cosmic Explorer</h1>
+            <p>AMR cosmology volume analysis</p>
           </div>
         </div>
-        <div class="mode-tabs" id="modeTabs">
-          <button data-mode="0" class="active">体渲染</button>
-          <button data-mode="1">MIP</button>
-          <button data-mode="2">等值面</button>
-          <button data-mode="3" title="按全局99%固定阈值高亮(跨步可比, 直观展示尾部变胖)">Top1% 高亮</button>
-          <button data-mode="4" title="按全局25%固定阈值显示低密度区">Void 空洞</button>
-          <button data-mode="5">MC 网格</button>
-        </div>
-        <div class="top-actions">
-          <button id="btnStory" class="action gold">▶ Story Mode</button>
-          <button id="btnProbe" class="action cyan">⌖ Cosmic Probe</button>
-          <button id="btnAtlas" class="action">⊞ Cosmic Atlas</button>
+
+        <nav class="page-tabs" id="pageTabs" aria-label="页面">
+          <button data-page="render" class="active">体渲染</button>
+          <button data-page="stats">统计演化</button>
+          <button data-page="brush">刷选联动</button>
+          <button data-page="web">形态结构</button>
+        </nav>
+
+        <div class="dataset-strip" aria-label="数据摘要">
+          <span>128^3</span>
+          <span>100 steps</span>
+          <span>log density</span>
+          <button id="themeToggle" class="theme-toggle" type="button">粉紫</button>
         </div>
       </header>
 
-      <!-- 左侧: 时间轴 + 播放 -->
-      <aside id="left">
-        <div class="panel">
-          <h2>时间轴 <span class="sub">Time Evolution</span><button id="timelineLayout" class="mini-toggle">⟳ 螺旋</button></h2>
+      <aside id="left" class="sidebar sidebar-left">
+        <section class="panel timeline-panel">
+          <header class="panel-head">
+            <h2>时间控制</h2>
+            <span>Time evolution</span>
+            <button id="timelineLayout" class="mini-toggle">螺旋</button>
+          </header>
           <div class="playback">
-            <button id="btnPlay" class="play">▶</button>
+            <button id="btnPlay" class="play" title="播放/暂停">▶</button>
             <input type="range" id="timeSlider" min="0" max="99" value="0" />
-            <div class="step-readout"><span id="stepLabel">t = 0000</span><span id="loadState"></span></div>
+            <div class="step-readout">
+              <span id="stepLabel">t = 0000</span>
+              <span id="loadState"></span>
+            </div>
           </div>
           <div id="timelineChart" class="chart-host"></div>
           <div class="legend-mini" id="timelineLegend"></div>
-        </div>
-        <div class="panel grow">
-          <h2>传递函数 <span class="sub">Transfer Function</span></h2>
+        </section>
+
+        <section class="panel tf-panel">
+          <header class="panel-head">
+            <h2>传递函数</h2>
+            <span>Transfer function</span>
+          </header>
           <div id="tfEditor" class="chart-host"></div>
           <div class="tf-controls">
             <label>密度增益 <input type="range" id="densityScale" min="0.2" max="4" step="0.05" value="1.3" /></label>
@@ -54,56 +64,86 @@
           <div class="tf-actions">
             <button id="tfRecommend" type="button">恢复推荐值</button>
           </div>
-        </div>
+        </section>
       </aside>
 
-      <!-- 中央: 3D 主视图 -->
-      <main id="center">
-        <div id="viewport">
-          <canvas id="glcanvas"></canvas>
-          <div id="probeHint" class="overlay-hint hidden">点击体内两点拉出探针视线 · ESC 取消</div>
-          <div id="viewBadges" class="view-badges"></div>
-          <div id="loadingOverlay" class="loading-overlay"><div class="spinner"></div><span>加载体数据…</span></div>
-        </div>
-        <div id="storyCaption" class="story-caption hidden"></div>
+      <main id="center" class="workspace">
+        <section class="panel viewport-panel">
+          <header class="viewport-toolbar">
+            <div class="mode-tabs" id="modeTabs">
+              <button data-mode="0" class="active">体渲染</button>
+              <button data-mode="1">MIP</button>
+              <button data-mode="2">等值面</button>
+              <button data-mode="3" title="按全局99%固定阈值高亮，跨时间步可比">Top1%</button>
+              <button data-mode="4" title="按全局25%固定阈值显示低密度区域">Void</button>
+              <button data-mode="5">MC 网格</button>
+            </div>
+
+            <div class="top-actions">
+              <button id="btnStory" class="action">Story</button>
+              <button id="btnProbe" class="action">Probe</button>
+              <button id="btnAtlas" class="action">Atlas</button>
+            </div>
+          </header>
+
+          <div id="viewport">
+            <canvas id="glcanvas"></canvas>
+            <div id="probeHint" class="overlay-hint hidden">点击体数据建立探针视线，ESC 取消</div>
+            <div id="viewBadges" class="view-badges"></div>
+            <div id="loadingOverlay" class="loading-overlay">
+              <div class="spinner"></div>
+              <span>加载体数据...</span>
+            </div>
+          </div>
+          <div id="storyCaption" class="story-caption hidden"></div>
+        </section>
       </main>
 
-      <!-- 右侧: 统计指标 + 形态学 -->
-      <aside id="right">
-        <div class="panel">
-          <h2>当前时间步统计 <span class="sub">Statistics</span></h2>
+      <aside id="right" class="sidebar sidebar-right">
+        <section class="panel stat-panel">
+          <header class="panel-head">
+            <h2>当前统计</h2>
+            <span>Current step</span>
+          </header>
           <div id="statGrid" class="stat-grid"></div>
-        </div>
-        <div class="panel">
-          <h2>选区联动 <span class="sub">Brush Selection</span></h2>
+        </section>
+
+        <section class="panel selection-panel">
+          <header class="panel-head">
+            <h2>选区统计</h2>
+            <span>Brush selection</span>
+          </header>
           <div id="selStats" class="sel-stats">框选直方图以筛选体素</div>
-        </div>
-        <div class="panel grow">
-          <h2>宇宙网形态学 <span class="sub">Cosmic Web</span></h2>
+        </section>
+
+        <section class="panel morph-panel">
+          <header class="panel-head">
+            <h2>宇宙网形态</h2>
+            <span>Cosmic web</span>
+          </header>
           <div id="morphBars" class="morph-bars"></div>
           <div class="atlas-controls" id="atlasControls"></div>
-        </div>
+        </section>
       </aside>
 
-      <!-- 底栏: 直方图刷选 / 指纹图 / 曲线 / 功率谱 / 探针 -->
-      <footer id="bottom">
+      <footer id="bottom" class="panel chart-panel">
         <div class="bottom-tabs" id="bottomTabs">
-          <button data-tab="hist" class="active">log 密度直方图 (刷选)</button>
+          <button data-tab="hist" class="active">log 密度直方图</button>
           <button data-tab="fingerprint">演化指纹图</button>
           <button data-tab="series">统计量曲线</button>
           <button data-tab="power">功率谱 P(k)</button>
-          <button data-tab="probe">探针剖面 / Lyman-α</button>
+          <button data-tab="probe">探针剖面</button>
         </div>
         <div class="bottom-body">
           <div class="tab-panel active" data-tab="hist">
-            <div class="brush-quick" id="brushQuick" title="区间基于全局固定分位数阈值(跨时间步可比); 晚期实际超阈体素占比会随长尾变胖而 > 标称值">
-              <button data-brush="void" title="logρ ≤ 全局25%分位">Void</button>
+            <div class="brush-quick" id="brushQuick" title="区间基于全局固定分位数阈值，跨时间步可比">
+              <button data-brush="void" title="log rho <= 全局25%分位">Void</button>
               <button data-brush="sheet" title="全局25%~75%分位">Sheet</button>
               <button data-brush="filament" title="全局75%~95%分位">Filament</button>
-              <button data-brush="node" title="≥ 全局95%分位">Node</button>
-              <button data-brush="top1" title="≥ 全局99%分位(固定阈值, 非每步重算1%)">Top1%</button>
-              <button data-brush="top01" title="≥ 全局99.9%分位(固定阈值)">Top0.1%</button>
-              <button data-brush="clear" class="clear">清除刷选</button>
+              <button data-brush="node" title=">= 全局95%分位">Node</button>
+              <button data-brush="top1" title=">= 全局99%分位，固定阈值">Top1%</button>
+              <button data-brush="top01" title=">= 全局99.9%分位，固定阈值">Top0.1%</button>
+              <button data-brush="clear" class="clear">清除</button>
             </div>
             <div id="histChart" class="chart-host"></div>
           </div>

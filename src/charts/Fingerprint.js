@@ -2,15 +2,13 @@
 // canvas 绘制底图 + SVG 轴/时间游标。
 import * as d3 from "d3";
 
-const cosmicScale = d3.interpolateRgbBasis([
-  "#05040c", "#10204a", "#1f6f9e", "#38e1d6", "#ffcc66", "#fffaf0",
-]);
-
 export class Fingerprint {
   constructor(el, meta, hist) {
     this.el = el; this.meta = meta; this.hist = hist;
     this.bins = hist.bins; this.steps = meta.timeSteps;
     this.margin = { top: 10, right: 16, bottom: 26, left: 46 };
+    this.scaleColors = ["#02030a", "#111936", "#28305f", "#4e3672", "#c8688c", "#f4e9ff"];
+    this.markerColor = "#7d8cff";
     this._buildImage();
     this._build();
   }
@@ -27,7 +25,7 @@ export class Fingerprint {
     for (let s = 0; s < this.steps; s++) {
       for (let b = 0; b < this.bins; b++) {
         const v = Math.pow(M[s][b] / mx, 0.42);
-        const c = d3.rgb(cosmicScale(v));
+        const c = d3.rgb(d3.interpolateRgbBasis(this.scaleColors)(v));
         const idx = (s * this.bins + b) * 4;
         img.data[idx] = c.r; img.data[idx + 1] = c.g; img.data[idx + 2] = c.b; img.data[idx + 3] = 255;
       }
@@ -44,7 +42,7 @@ export class Fingerprint {
     this.g = this.svg.append("g");
     this.gx = this.g.append("g").attr("class", "axis");
     this.gy = this.g.append("g").attr("class", "axis");
-    this.marker = this.g.append("line").attr("stroke", "#38e1d6").attr("stroke-width", 1.5).attr("opacity", 0.9);
+    this.marker = this.g.append("line").attr("stroke", this.markerColor).attr("stroke-width", 1.5).attr("opacity", 0.9);
     this.g.append("text").attr("fill", "#5d6b86").attr("font-size", 10).attr("x", -34).attr("y", -2).text("step");
     this.x = d3.scaleLinear().domain([this.meta.globalLogMin, this.meta.globalLogMax]);
     this.y = d3.scaleLinear().domain([0, this.steps - 1]);
@@ -78,6 +76,14 @@ export class Fingerprint {
     this._step = step;
     const yy = this.y(step);
     this.marker.attr("y1", yy).attr("y2", yy);
+  }
+
+  setTheme(theme) {
+    this.scaleColors = theme.fingerprint;
+    this.markerColor = theme.accent;
+    this._buildImage();
+    if (this.marker) this.marker.attr("stroke", this.markerColor);
+    this._resize();
   }
 
   resize() { this._resize(); }

@@ -1,6 +1,6 @@
-// WebGL2 (GLSL ES 3.00) 光线步进体渲染着色器。
-// 3D 纹理存归一化 log-density; 支持 体渲染/MIP/等值面/top高亮/void 五模式,
-// 梯度光照、相空间刷选门控、Cosmic Atlas 形态学叠加。
+﻿// WebGL2 (GLSL ES 3.00) 鍏夌嚎姝ヨ繘浣撴覆鏌撶潃鑹插櫒銆?
+// 3D 绾圭悊瀛樺綊涓€鍖?log-density; 鏀寔 浣撴覆鏌?MIP/绛夊€奸潰/top楂樹寒/void 浜旀ā寮?
+// 姊害鍏夌収銆佺浉绌洪棿鍒烽€夐棬鎺с€丆osmic Atlas 褰㈡€佸鍙犲姞銆?
 
 export const volumeVert = /* glsl */ `
 out vec3 vWorldPos;
@@ -28,8 +28,8 @@ uniform int   uMode;          // 0 vol 1 mip 2 iso 3 top 4 void
 uniform float uStepCount;
 uniform float uDensityScale;
 uniform float uIso;
-uniform float uHiClip;        // top 高亮阈值 (归一化)
-uniform float uLoClip;        // void 阈值
+uniform float uHiClip;        // top 楂樹寒闃堝€?(褰掍竴鍖?
+uniform float uLoClip;        // void 闃堝€?
 uniform bool  uBrushActive;
 uniform float uBrushMin;
 uniform float uBrushMax;
@@ -39,12 +39,21 @@ uniform float uTime;
 
 uniform bool  uAtlasActive;
 uniform float uAtlasOpacity;
-uniform vec3  uClassOn;        // sheet, filament, node 开关(1/0)
+uniform vec3  uClassSheet;
+uniform vec3  uClassFilament;
+uniform vec3  uClassNode;
+uniform vec3  uClassVoid;
+uniform vec3  uTopLow;
+uniform vec3  uTopHigh;
+uniform vec3  uHighlight;
+uniform vec3  uVoidLow;
+uniform vec3  uVoidHigh;
+uniform vec3  uClassOn;        // sheet, filament, node 寮€鍏?1/0)
 
 const vec3 BMIN = vec3(-0.5);
 const vec3 BMAX = vec3(0.5);
 const int  MAX_STEPS = 1024;
-const int  SHADOW_STEPS = 6;
+const int  SHADOW_STEPS = 4;
 const float TF_BIN = 1.0 / 255.0;
 const float ADAPTIVE_MIN_SCALE = 0.5;
 const float ADAPTIVE_MAX_SCALE = 1.75;
@@ -108,12 +117,12 @@ float shadowTransmittance(vec3 pos, float stepLen, vec3 lightDir) {
   return clamp(trans, 0.0, 1.0);
 }
 
-// 形态学类别颜色
+// 褰㈡€佸绫诲埆棰滆壊
 vec3 classColor(int c) {
-  if (c == 1) return vec3(0.30, 0.55, 0.95);   // sheet 蓝
-  if (c == 2) return vec3(0.35, 0.95, 0.85);   // filament 青
-  if (c == 3) return vec3(1.00, 0.82, 0.35);   // node 金
-  return vec3(0.10, 0.12, 0.25);               // void
+  if (c == 1) return uClassSheet;
+  if (c == 2) return uClassFilament;
+  if (c == 3) return uClassNode;
+  return uClassVoid;
 }
 
 void main() {
@@ -150,7 +159,7 @@ void main() {
       t += dt; continue;
     }
 
-    // ---------- 等值面 ----------
+    // ---------- 绛夊€奸潰 ----------
     if (uMode == 2) {
       if (d >= uIso) {
         vec3 N = normalize(-gradient(uvw) + 1e-6);
@@ -166,11 +175,11 @@ void main() {
       t += dt; continue;
     }
 
-    // ---------- top 高亮 ----------
+    // ---------- top 楂樹寒 ----------
     if (uMode == 3) {
       if (d >= uHiClip) {
         float k = clamp((d - uHiClip) / max(1.0 - uHiClip, 1e-3), 0.0, 1.0);
-        vec3 glow = mix(vec3(1.0, 0.55, 0.15), vec3(1.0, 0.97, 0.85), k);
+        vec3 glow = mix(uTopLow, uTopHigh, k);
         vec3 N = normalize(-gradient(uvw) + 1e-6);
         float diff = 0.5 + 0.5 * clamp(dot(N, L), 0.0, 1.0);
         float a = (0.12 + 0.55 * k);
@@ -185,7 +194,7 @@ void main() {
     if (uMode == 4) {
       if (d <= uLoClip) {
         float k = clamp((uLoClip - d) / max(uLoClip, 1e-3), 0.0, 1.0);
-        vec3 mist = mix(vec3(0.12, 0.18, 0.40), vec3(0.05, 0.06, 0.16), k);
+        vec3 mist = mix(uVoidLow, uVoidHigh, k);
         float a = 0.018 + 0.05 * k;
         col += (1.0 - alpha) * a * mist;
         alpha += (1.0 - alpha) * a;
@@ -193,7 +202,7 @@ void main() {
       t += dt; continue;
     }
 
-    // ---------- 体渲染 (mode 0) ----------
+    // ---------- 浣撴覆鏌?(mode 0) ----------
     float gate = 1.0;
     if (uBrushActive && (d < uBrushMin || d > uBrushMax)) gate = 0.0;
     vec4 src = texture(uTF, vec2(d, 0.5));
@@ -231,7 +240,7 @@ void main() {
 
     vec3 ambient = src.rgb * 0.16;
     vec3 direct = src.rgb * (0.64 * diff);
-    vec3 highlight = vec3(0.98, 0.93, 0.82) * spec * 0.16 * src.a;
+    vec3 highlight = uHighlight * spec * 0.16 * src.a;
     vec3 lit = ambient + shadow * (direct + highlight);
     if (uAtlasActive && atlasClass >= 1 && atlasOn) {
       lit = mix(lit, atlasColor * (0.20 + shadow * (0.35 + 0.65 * diff)), uAtlasOpacity);

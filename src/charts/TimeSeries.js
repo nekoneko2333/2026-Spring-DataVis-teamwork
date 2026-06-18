@@ -18,7 +18,8 @@ export class TimeSeries {
     this.gx = this.g.append("g").attr("class", "axis");
     this.gGrid = this.g.append("g").attr("class", "grid");
     this.gLines = this.g.append("g");
-    this.marker = this.g.append("line").attr("stroke", "#c06a09").attr("stroke-dasharray", "3,3").attr("opacity", 0.8);
+    this.markerColor = "#b04f78";
+    this.marker = this.g.append("line").attr("stroke", this.markerColor).attr("stroke-dasharray", "3,3").attr("opacity", 0.8);
     this.focus = this.g.append("g");
     this.legend = d3.select(this.el).append("div").attr("class", "ts-legend")
       .style("position", "absolute").style("top", "2px").style("right", "16px")
@@ -84,8 +85,19 @@ export class TimeSeries {
     i = Math.min(this.N - 1, Math.max(0, i));
     const rows = this.series.filter((s) => this.on.has(s.key))
       .map((s) => `<div><span style="color:${s.color}">●</span> ${s.label}: <b>${d3.format(".4g")(s.values[i])}</b></div>`).join("");
-    this.tip.style("opacity", 1).html(`<div style="color:#c06a09">t = ${i}</div>${rows}`)
+    this.tip.style("opacity", 1).html(`<div style="color:${this.markerColor}">t = ${i}</div>${rows}`)
       .style("left", `${Math.min(ev.offsetX + 14, this.el.clientWidth - 150)}px`).style("top", `${ev.offsetY + 8}px`);
+  }
+
+  setTheme(theme) {
+    this.markerColor = theme.timeline.legendLate;
+    for (const s of this.series) {
+      if (theme.series[s.key]) s.color = theme.series[s.key];
+    }
+    this.marker.attr("stroke", this.markerColor);
+    this._buildLegend();
+    this._draw();
+    if (this._step != null) this.update(this._step);
   }
 
   resize() { this._resize(); }

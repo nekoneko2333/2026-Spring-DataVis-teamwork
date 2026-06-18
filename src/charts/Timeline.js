@@ -13,6 +13,7 @@ export class Timeline {
       : stats.steps.map((s) => 1 - s.percentiles["99"] / s.max);
     this.margin = { top: 16, right: 14, bottom: 18, left: 14 };
     this.layout = "linear";
+    this.theme = null;
     this.giniColor = d3.scaleSequential(d3.interpolateRgbBasis(["#2563eb", "#0d8c8a", "#d97706"]))
       .domain(d3.extent(this.gini));
     this.rScale = d3.scaleSqrt().domain(d3.extent(this.highFrac)).range([1.5, 5]);
@@ -21,6 +22,16 @@ export class Timeline {
   }
 
   setLayout(mode) { this.layout = mode; this._resize(); }
+  setTheme(theme) {
+    this.theme = theme;
+    this.giniColor = d3.scaleSequential(d3.interpolateRgbBasis([
+      theme.timeline.early,
+      theme.timeline.mid,
+      theme.timeline.late,
+    ])).domain(d3.extent(this.gini));
+    if (this.cursor) this.cursor.attr("stroke", theme.timeline.cursor);
+    this._resize();
+  }
 
   _build() {
     this.svg = d3.select(this.el).append("svg").style("width", "100%").style("height", "100%");

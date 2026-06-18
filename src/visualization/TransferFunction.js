@@ -37,13 +37,18 @@ function sampleAnchors(anchors, x) {
   return anchors[anchors.length - 1][1];
 }
 
-function colorStops(q) {
-  return [
-    { p: 0.0, c: hexRGB("#02030a") }, { p: q.q25, c: hexRGB("#09101c") },
-    { p: q.q50, c: hexRGB("#123249") }, { p: q.q75, c: hexRGB("#176c79") },
-    { p: q.q90, c: hexRGB("#20b8b2") }, { p: q.q95, c: hexRGB("#78d2c8") },
-    { p: q.q99, c: hexRGB("#e8b14a") }, { p: 1.0, c: hexRGB("#f7eed7") },
+function stopPosition(q, key) {
+  if (key === "0") return 0;
+  if (key === "1") return 1;
+  return q[`q${String(key).replace(".", "")}`] ?? 0;
+}
+
+function colorStops(q, theme) {
+  const stops = theme?.tfStops || [
+    ["0", "#02030a"], ["25", "#070b18"], ["50", "#111936"], ["75", "#28305f"],
+    ["90", "#4e3672"], ["95", "#854071"], ["99", "#c8688c"], ["1", "#f4e9ff"],
   ];
+  return stops.map(([p, color]) => ({ p: stopPosition(q, p), c: hexRGB(color) }));
 }
 
 function alphaStops(q) {
@@ -75,12 +80,20 @@ export class TransferFunction {
     this.texture = new DataTexture(this.data, LUT_N, 1, RGBAFormat, UnsignedByteType);
     this.texture.minFilter = this.texture.magFilter = LinearFilter;
     this.texture.wrapS = this.texture.wrapT = ClampToEdgeWrapping;
+    this.theme = null;
     this.setRecommendedStable();
   }
 
-  setRecommendedStable() {
-    this.colorAnchors = colorStops(this.q).map((s) => ({ p: s.p, c: [...s.c] }));
+  setRecommendedStable(theme = this.theme) {
+    if (theme) this.theme = theme;
+    this.colorAnchors = colorStops(this.q, this.theme).map((s) => ({ p: s.p, c: [...s.c] }));
     this.alphaAnchors = alphaStops(this.q).map((s) => ({ p: s.p, a: s.a }));
+    this.build();
+  }
+
+  setTheme(theme) {
+    this.theme = theme;
+    this.colorAnchors = colorStops(this.q, theme).map((s) => ({ p: s.p, c: [...s.c] }));
     this.build();
   }
 

@@ -5,7 +5,7 @@ import {
   GLSL3, Vector3, Vector2, BackSide, DoubleSide, LineSegments, EdgesGeometry,
   LineBasicMaterial, BufferGeometry, Line, AdditiveBlending,
   Data3DTexture, RedFormat, RGBFormat, FloatType, NearestFilter, UnsignedByteType,
-  MeshStandardMaterial, AmbientLight, DirectionalLight, BufferAttribute, Float32BufferAttribute,
+  MeshBasicMaterial, MeshStandardMaterial, AmbientLight, DirectionalLight, BufferAttribute, Float32BufferAttribute,
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { volumeVert, volumeFrag } from "./shaders.js";
@@ -31,7 +31,7 @@ export class VolumeRenderer {
     this.meta = meta;
     this.canvas = canvas;
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, premultipliedAlpha: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.35));
     this.renderer.setClearColor(0x000000, 0);
     // R32F 线性插值
     this.renderer.getContext().getExtension("OES_texture_float_linear");
@@ -47,8 +47,9 @@ export class VolumeRenderer {
     this.controls.minDistance = 0.7;
     this.controls.maxDistance = 6;
     this.baseStepCount = 256;
-    this.interactionStepCount = 160;
+    this.interactionStepCount = 128;
     this.isInteracting = false;
+    this.active = true;
     this.controls.addEventListener("start", () => {
       this.isInteracting = true;
       this._applyStepCount();
@@ -79,6 +80,15 @@ export class VolumeRenderer {
       uAtlasActive: { value: false },
       uAtlasOpacity: { value: 0.55 },
       uClassOn: { value: new Vector3(0, 1, 1) },
+      uClassSheet: { value: new Vector3(0.30, 0.55, 0.95) },
+      uClassFilament: { value: new Vector3(0.48, 0.58, 1.00) },
+      uClassNode: { value: new Vector3(0.95, 0.43, 0.65) },
+      uClassVoid: { value: new Vector3(0.10, 0.12, 0.25) },
+      uTopLow: { value: new Vector3(0.70, 0.36, 0.76) },
+      uTopHigh: { value: new Vector3(0.96, 0.90, 1.00) },
+      uHighlight: { value: new Vector3(0.92, 0.88, 1.00) },
+      uVoidLow: { value: new Vector3(0.12, 0.18, 0.40) },
+      uVoidHigh: { value: new Vector3(0.05, 0.06, 0.16) },
     };
 
     this.material = new ShaderMaterial({
@@ -91,23 +101,29 @@ export class VolumeRenderer {
       depthWrite: false,
     });
 
+    this.cubeInterior = new Mesh(
+      new BoxGeometry(1.001, 1.001, 1.001),
+      new MeshBasicMaterial({ color: 0x02030a, side: BackSide })
+    );
+    this.scene.add(this.cubeInterior);
+
     this.mesh = new Mesh(new BoxGeometry(1, 1, 1), this.material);
     this.scene.add(this.mesh);
 
     // 包围盒线框(定向参考)
-    const edges = new LineSegments(
+    this.edges = new LineSegments(
       new EdgesGeometry(new BoxGeometry(1, 1, 1)),
       new LineBasicMaterial({ color: 0x2a496f, transparent: true, opacity: 0.5 })
     );
-    this.scene.add(edges);
+    this.scene.add(this.edges);
 
     // MC 真实网格(光照渲染)
     this.scene.add(new AmbientLight(0x4a6a9a, 0.9));
-    const key = new DirectionalLight(0xfff0d8, 1.5); key.position.set(1, 1.2, 0.8); this.scene.add(key);
-    const rim = new DirectionalLight(0x38e1d6, 0.7); rim.position.set(-1, -0.5, -0.8); this.scene.add(rim);
+    this.keyLight = new DirectionalLight(0xe9ecff, 1.5); this.keyLight.position.set(1, 1.2, 0.8); this.scene.add(this.keyLight);
+    this.rimLight = new DirectionalLight(0x7d8cff, 0.7); this.rimLight.position.set(-1, -0.5, -0.8); this.scene.add(this.rimLight);
     this.mcMaterial = new MeshStandardMaterial({
-      color: 0xffcc66, metalness: 0.35, roughness: 0.45, side: DoubleSide,
-      emissive: 0x3a2a08, flatShading: false,
+      color: 0xc8688c, metalness: 0.28, roughness: 0.48, side: DoubleSide,
+      emissive: 0x241022, flatShading: false,
     });
     this.mcMesh = new Mesh(new BufferGeometry(), this.mcMaterial);
     this.mcMesh.visible = false;
@@ -140,6 +156,26 @@ export class VolumeRenderer {
     this._applyStepCount();
   }
   setDensityScale(s) { this.uniforms.uDensityScale.value = s; }
+  setActive(active) { this.active = active; }
+  setTheme(theme) {
+    this.theme = theme;
+    const v = theme.volume;
+    this.edges.material.color.set(v.edge);
+    this.keyLight.color.set(v.key);
+    this.rimLight.color.set(v.rim);
+    this.mcMaterial.color.set(v.mesh);
+    this.mcMaterial.emissive.set(v.emissive);
+    if (this.probeLine) this.probeLine.material.color.set(v.probe);
+    this.uniforms.uClassSheet.value.fromArray(v.classSheet);
+    this.uniforms.uClassFilament.value.fromArray(v.classFilament);
+    this.uniforms.uClassNode.value.fromArray(v.classNode);
+    this.uniforms.uClassVoid.value.fromArray(v.classVoid);
+    this.uniforms.uTopLow.value.fromArray(v.topLow);
+    this.uniforms.uTopHigh.value.fromArray(v.topHigh);
+    this.uniforms.uHighlight.value.fromArray(v.highlight);
+    this.uniforms.uVoidLow.value.fromArray(v.voidLow);
+    this.uniforms.uVoidHigh.value.fromArray(v.voidHigh);
+  }
   setIso(v) { this.uniforms.uIso.value = v; }
   setHiClip(v) { this.uniforms.uHiClip.value = v; }
   setLoClip(v) { this.uniforms.uLoClip.value = v; }
@@ -158,6 +194,7 @@ export class VolumeRenderer {
   setMeshMode(on) {
     this.mcMesh.visible = on;
     this.mesh.visible = !on;
+    this.cubeInterior.visible = !on;
   }
   setMesh(positions, indices) {
     const g = new BufferGeometry();
@@ -208,7 +245,7 @@ export class VolumeRenderer {
   _drawProbe(p0, p1) {
     if (this.probeLine) { this.scene.remove(this.probeLine); this.probeLine.geometry.dispose(); }
     const g = new BufferGeometry().setFromPoints([p0, p1]);
-    const m = new LineBasicMaterial({ color: 0x38e1d6, transparent: true, opacity: 0.95, blending: AdditiveBlending });
+    const m = new LineBasicMaterial({ color: this.theme?.volume?.probe || 0x8ea0ff, transparent: true, opacity: 0.95, blending: AdditiveBlending });
     this.probeLine = new Line(g, m);
     this.scene.add(this.probeLine);
   }
@@ -232,6 +269,7 @@ export class VolumeRenderer {
 
   _loop() {
     requestAnimationFrame(() => this._loop());
+    if (!this.active) return;
     this.controls.update();
     this.uniforms.uCameraPos.value.copy(this.camera.position);
     this.uniforms.uTime.value = (performance.now() - this.clock0) / 1000;
