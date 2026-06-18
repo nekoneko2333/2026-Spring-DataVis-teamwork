@@ -103,7 +103,7 @@ export class VolumeRenderer {
 
     this.cubeInterior = new Mesh(
       new BoxGeometry(1.001, 1.001, 1.001),
-      new MeshBasicMaterial({ color: 0x02030a, side: BackSide })
+      new MeshBasicMaterial({ color: 0xf2f4f8, side: BackSide })
     );
     this.scene.add(this.cubeInterior);
 
@@ -122,8 +122,8 @@ export class VolumeRenderer {
     this.keyLight = new DirectionalLight(0xe9ecff, 1.5); this.keyLight.position.set(1, 1.2, 0.8); this.scene.add(this.keyLight);
     this.rimLight = new DirectionalLight(0x7d8cff, 0.7); this.rimLight.position.set(-1, -0.5, -0.8); this.scene.add(this.rimLight);
     this.mcMaterial = new MeshStandardMaterial({
-      color: 0xc8688c, metalness: 0.28, roughness: 0.48, side: DoubleSide,
-      emissive: 0x241022, flatShading: false,
+      color: 0xffcc66, metalness: 0.28, roughness: 0.48, side: DoubleSide,
+      emissive: 0x3a2a08, flatShading: false,
     });
     this.mcMesh = new Mesh(new BufferGeometry(), this.mcMaterial);
     this.mcMesh.visible = false;
@@ -157,9 +157,23 @@ export class VolumeRenderer {
   }
   setDensityScale(s) { this.uniforms.uDensityScale.value = s; }
   setActive(active) { this.active = active; }
+  setControlsEnabled(enabled) { this.controls.enabled = enabled; }
+  getCameraPose() {
+    return {
+      position: this.camera.position.toArray(),
+      target: this.controls.target.toArray(),
+    };
+  }
+  setCameraPose(position, target = [0, 0, 0]) {
+    this.camera.position.fromArray(position);
+    this.controls.target.fromArray(target);
+    this.camera.lookAt(this.controls.target);
+    this.camera.updateProjectionMatrix();
+  }
   setTheme(theme) {
     this.theme = theme;
     const v = theme.volume;
+    this.cubeInterior.material.color.set(v.cubeInterior || "#f2f4f8");
     this.edges.material.color.set(v.edge);
     this.keyLight.color.set(v.key);
     this.rimLight.color.set(v.rim);

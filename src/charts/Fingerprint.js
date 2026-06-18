@@ -7,7 +7,7 @@ export class Fingerprint {
     this.el = el; this.meta = meta; this.hist = hist;
     this.bins = hist.bins; this.steps = meta.timeSteps;
     this.margin = { top: 10, right: 16, bottom: 26, left: 46 };
-    this.scaleColors = ["#02030a", "#111936", "#28305f", "#4e3672", "#c8688c", "#f4e9ff"];
+    this.scaleColors = ["#f2f6f7", "#b7dad9", "#74bbb7", "#0d8c8a", "#ffcc66", "#fffaf0"];
     this.markerColor = "#7d8cff";
     this._buildImage();
     this._build();

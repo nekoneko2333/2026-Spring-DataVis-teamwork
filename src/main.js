@@ -10,7 +10,7 @@ import { TimeSeries } from "./charts/TimeSeries.js";
 import { PowerSpectrum } from "./charts/PowerSpectrum.js";
 import { Timeline } from "./charts/Timeline.js";
 import { ProbePanel } from "./charts/ProbePanel.js";
-import { DEFAULT_THEME, THEME_ORDER, THEMES } from "./themes.js";
+import { DEFAULT_THEME, THEMES } from "./themes.js";
 
 const $ = (s) => document.querySelector(s);
 const TOTAL_VOX = 128 * 128 * 128;
@@ -132,8 +132,6 @@ class App {
     this.themeName = name;
     this.theme = THEMES[name];
     $("#app").dataset.theme = name;
-    const btn = $("#themeToggle");
-    if (btn) btn.textContent = this.theme.label;
 
     if (this.tf) {
       this.tf.setTheme(this.theme);
@@ -158,11 +156,6 @@ class App {
       const sw = document.querySelector(`.cls-toggle[data-cls="${cls}"] .sw`);
       if (sw) sw.style.background = this.theme.morph[cls];
     }
-  }
-
-  _toggleTheme() {
-    const i = THEME_ORDER.indexOf(this.themeName);
-    this._applyTheme(THEME_ORDER[(i + 1) % THEME_ORDER.length]);
   }
 
   _renderTFEditor() {
@@ -301,8 +294,6 @@ class App {
 
   // ---------------- events ----------------
   _bindEvents() {
-    $("#themeToggle").addEventListener("click", () => this._toggleTheme());
-
     $("#pageTabs").addEventListener("click", (e) => {
       const b = e.target.closest("button"); if (!b) return;
       this._setPage(b.dataset.page);
@@ -642,16 +633,51 @@ class App {
 
   _startStory() {
     state.story.running = true;
+    this.pageBeforeStory = this.page;
+    this.storyCameraPose = this.renderer.getCameraPose();
+    this.renderer.setControlsEnabled(false);
+    this._setPage("render");
+    $("#app").classList.add("story-mode");
+    const appEl = $("#app");
+    if (appEl.requestFullscreen && !document.fullscreenElement) {
+      appEl.requestFullscreen().catch(() => {});
+    }
     $("#btnStory").textContent = "■ 停止";
     $("#storyCaption").classList.remove("hidden");
     this.pause(); this._clearBrush();
     const cap = (chapter, text) => { $("#storyCaption").innerHTML = `<span class="chapter">${chapter}</span>${text}`; };
-    const tweenStep = (from, to, dur) => new Promise((res) => {
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const ease = (t) => t * t * (3 - 2 * t);
+    const mixVec = (a, b, t) => a.map((v, i) => lerp(v, b[i], t));
+    const setShot = (a, b, k) => {
+      const t = ease(k);
+      this.renderer.setCameraPose(mixVec(a.position, b.position, t), mixVec(a.target, b.target, t));
+    };
+    const shots = {
+      establish: { position: [1.35, 0.95, 1.55], target: [0, 0, 0] },
+      drift: { position: [0.85, 0.50, 1.05], target: [0.03, -0.02, 0.02] },
+      filament: { position: [-0.78, 0.34, 0.86], target: [0.10, 0.03, 0.00] },
+      skim: { position: [-0.18, -0.18, 0.62], target: [0.14, 0.08, -0.02] },
+      node: { position: [0.42, 0.30, 0.54], target: [-0.04, 0.02, 0.02] },
+      atlas: { position: [1.08, -0.42, 0.78], target: [0.00, 0.00, 0.00] },
+    };
+    const tweenCamera = (from, to, dur) => new Promise((res) => {
+      const t0 = performance.now();
+      const run = () => {
+        if (!state.story.running) return res();
+        const k = Math.min(1, (performance.now() - t0) / dur);
+        setShot(from, to, k);
+        if (k < 1) requestAnimationFrame(run); else res();
+      };
+      run();
+    });
+    const tweenStep = (from, to, dur, cameraFrom, cameraTo) => new Promise((res) => {
       const t0 = performance.now();
       const run = () => {
         if (!state.story.running) return res();
         const k = Math.min(1, (performance.now() - t0) / dur);
         this.setStep(Math.round(from + (to - from) * k), { fromPlayback: true });
+        if (cameraFrom && cameraTo) setShot(cameraFrom, cameraTo, k);
         if (k < 1) requestAnimationFrame(run); else res();
       };
       run();
@@ -661,20 +687,23 @@ class App {
     (async () => {
       this._setMode(0);
       cap("第一幕 · 初生", "早期宇宙气体密度近乎均匀, log 密度分布窄而对称, 仅有微弱涨落 —— 结构的种子。");
-      this.setStep(0); await wait(3200);
+      this.setStep(0);
+      this.renderer.setCameraPose(shots.establish.position, shots.establish.target);
+      await tweenCamera(shots.establish, shots.drift, 3200);
       if (!state.story.running) return;
-      cap("第二幕 · 成丝", "引力放大涨落, 物质沿网状丝结构汇聚。刷选中高密度区间, 青色丝状网络逐渐显现。");
+      cap("第二幕 · 成丝", "引力放大涨落, 物质沿网状丝结构汇聚。刷选中高密度区间, 丝状网络逐渐显现。");
       this._quickBrush("filament", document.querySelector('#brushQuick [data-brush="filament"]'));
-      await tweenStep(0, 62, 5200);
+      await tweenStep(0, 62, 5200, shots.drift, shots.filament);
       if (!state.story.running) return;
       cap("第三幕 · 分化", "晚期密度两极分化: 节点处物质塌缩成最亮团块, 空洞被进一步抽空。高亮 Top1% 致密节点。");
       this._clearBrush(); this._setMode(3);
-      await tweenStep(62, 99, 4200);
+      await tweenStep(62, 99, 4200, shots.filament, shots.skim);
+      await tweenCamera(shots.skim, shots.node, 1800);
       if (!state.story.running) return;
-      cap("第四幕 · 宇宙图谱", "叠加形态学分类 (Cosmic Atlas): 金=节点, 青=丝, 蓝=墙, 暗=空洞 —— 统计长尾与空间宇宙网一一对应。");
+      cap("第四幕 · 宇宙图谱", "叠加形态学分类 (Cosmic Atlas): 节点、丝、墙与空洞被分层显示 —— 统计长尾与空间宇宙网一一对应。");
       this._setMode(0);
       if (!state.atlas.active) this._toggleAtlas();
-      await wait(5200);
+      await tweenCamera(shots.node, shots.atlas, 5200);
       this._stopStory();
     })();
   }
@@ -682,8 +711,22 @@ class App {
   _stopStory() {
     state.story.running = false;
     clearTimeout(this._storyTimer);
+    $("#app").classList.remove("story-mode");
+    this.renderer.setControlsEnabled(true);
+    if (this.storyCameraPose) {
+      this.renderer.setCameraPose(this.storyCameraPose.position, this.storyCameraPose.target);
+      this.storyCameraPose = null;
+    }
+    if (document.fullscreenElement === $("#app") && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
     $("#btnStory").textContent = "▶ Story Mode";
     $("#storyCaption").classList.add("hidden");
+    if (this.pageBeforeStory) {
+      const page = this.pageBeforeStory;
+      this.pageBeforeStory = null;
+      this._setPage(page);
+    }
   }
 
   // ---------------- panels update ----------------

@@ -8,15 +8,16 @@
   --line-soft: rgba(255, 255, 255, 0.72);
   --ink: #2d3436;
   --muted: #4a5568;
-  --accent: #ff4757;
-  --accent-dark: #bd2634;
-  --accent-soft: rgba(255, 71, 87, 0.14);
-  --accent-glow: rgba(255, 71, 87, 0.42);
-  --accent-shadow: rgba(189, 38, 52, 0.34);
-  --accent-highlight: rgba(255, 126, 138, 0.34);
-  --stat-cyan: #3f6fc7;
-  --gold: #ff4757;
-  --red: #bd2634;
+  --accent: #0d8c8a;
+  --accent-dark: #087572;
+  --accent-soft: rgba(13, 140, 138, 0.14);
+  --accent-fill: rgba(13, 140, 138, 0.10);
+  --accent-glow: rgba(13, 140, 138, 0.42);
+  --accent-shadow: rgba(8, 117, 114, 0.34);
+  --accent-highlight: rgba(56, 225, 214, 0.34);
+  --stat-cyan: #0d8c8a;
+  --gold: #c06a09;
+  --red: #c06a09;
   --stage: #edf2f8;
   --panel-radius: 16px;
   --control-radius: 8px;
@@ -32,36 +33,13 @@
   --accent: #0d8c8a;
   --accent-dark: #087572;
   --accent-soft: rgba(13, 140, 138, 0.14);
+  --accent-fill: rgba(13, 140, 138, 0.10);
   --accent-glow: rgba(13, 140, 138, 0.42);
   --accent-shadow: rgba(8, 117, 114, 0.34);
   --accent-highlight: rgba(56, 225, 214, 0.34);
   --stat-cyan: #0d8c8a;
   --gold: #c06a09;
   --red: #c06a09;
-}
-
-#app[data-theme="violet"] {
-  --accent: #c8688c;
-  --accent-dark: #9f4a6c;
-  --accent-soft: rgba(200, 104, 140, 0.14);
-  --accent-glow: rgba(200, 104, 140, 0.42);
-  --accent-shadow: rgba(159, 74, 108, 0.34);
-  --accent-highlight: rgba(244, 196, 224, 0.42);
-  --stat-cyan: #3f6fc7;
-  --gold: #c8688c;
-  --red: #c8688c;
-}
-
-#app[data-theme="red"] {
-  --accent: #ff4757;
-  --accent-dark: #bd2634;
-  --accent-soft: rgba(255, 71, 87, 0.14);
-  --accent-glow: rgba(255, 71, 87, 0.42);
-  --accent-shadow: rgba(189, 38, 52, 0.34);
-  --accent-highlight: rgba(255, 126, 138, 0.34);
-  --stat-cyan: #3f6fc7;
-  --gold: #ff4757;
-  --red: #bd2634;
 }
 
 * { box-sizing: border-box; }
@@ -332,27 +310,6 @@ button {
   background: #22c55e;
   box-shadow: 0 0 9px rgba(34, 197, 94, 0.72);
   vertical-align: -1px;
-}
-
-.theme-toggle {
-  min-height: 34px;
-  padding: 6px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 10px;
-  background: linear-gradient(145deg, #edf1f6, #d6dde8);
-  box-shadow: 4px 4px 8px #babecc, -4px -4px 8px #ffffff;
-  color: var(--accent);
-  cursor: pointer;
-  font-family: "JetBrains Mono", "Roboto Mono", Consolas, monospace;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.045em;
-  text-transform: uppercase;
-}
-
-.theme-toggle:active {
-  transform: translateY(2px);
-  box-shadow: var(--shadow-pressed);
 }
 
 .sidebar {
@@ -733,7 +690,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .tf-area {
-  fill: rgba(255, 71, 87, 0.1);
+  fill: var(--accent-fill);
 }
 
 .tf-line {
@@ -920,6 +877,124 @@ input[type="range"]::-webkit-slider-thumb {
   color: var(--accent);
   font-weight: 800;
   margin-right: 8px;
+}
+
+#app.story-mode {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "center";
+  gap: 0;
+  padding: 0;
+  background:
+    linear-gradient(rgba(74, 85, 104, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74, 85, 104, 0.035) 1px, transparent 1px),
+    radial-gradient(circle at 50% 22%, rgba(255, 255, 255, 0.72), transparent 54%),
+    var(--bg);
+  background-size: 42px 42px, 42px 42px, 100% 100%, 100% 100%;
+}
+
+#app.story-mode #topbar,
+#app.story-mode #left,
+#app.story-mode #right,
+#app.story-mode #bottom {
+  display: none !important;
+}
+
+#app.story-mode #center {
+  grid-area: center;
+  min-height: 100vh;
+  display: flex;
+}
+
+#app.story-mode .viewport-panel {
+  height: 100vh;
+  width: 100vw;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background:
+    radial-gradient(circle at 12% 16%, var(--accent-soft), transparent 28%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.38), rgba(209, 217, 230, 0.28)),
+    var(--surface);
+}
+
+#app.story-mode .viewport-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 10px 10px, rgba(45, 52, 54, 0.16) 0 1px, transparent 1.5px),
+    linear-gradient(115deg, transparent 0 58%, rgba(255, 255, 255, 0.28) 58% 59%, transparent 59%),
+    linear-gradient(245deg, transparent 0 64%, rgba(163, 177, 198, 0.24) 64% 65%, transparent 65%);
+  background-size: 28px 28px, 100% 100%, 100% 100%;
+  opacity: 0.42;
+}
+
+#app.story-mode .viewport-toolbar {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  z-index: 15;
+  min-height: 54px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+#app.story-mode #viewport {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(rgba(74, 85, 104, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74, 85, 104, 0.05) 1px, transparent 1px),
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.90), transparent 62%),
+    var(--stage);
+  background-size: 34px 34px, 34px 34px, 100% 100%, 100% 100%;
+  box-shadow: none;
+}
+
+#app.story-mode #viewport::after {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.18) 50%, rgba(163, 177, 198, 0.06) 50%),
+    radial-gradient(circle at 50% 50%, transparent 52%, rgba(45, 52, 54, 0.08) 100%);
+  opacity: 0.24;
+}
+
+#app.story-mode .story-caption {
+  position: absolute;
+  left: clamp(24px, 5vw, 72px);
+  right: clamp(24px, 38vw, 520px);
+  bottom: clamp(22px, 5vh, 54px);
+  z-index: 16;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 18px;
+  padding: 18px 22px;
+  background: var(--surface);
+  box-shadow: var(--shadow-floating);
+  color: var(--ink);
+  font-size: clamp(15px, 1.25vw, 18px);
+  line-height: 1.72;
+}
+
+#app.story-mode .story-caption .chapter {
+  display: block;
+  margin: 0 0 8px;
+  font-family: "JetBrains Mono", "Roboto Mono", Consolas, monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#app.story-mode .view-badges {
+  left: auto;
+  right: 28px;
+  bottom: 32px;
+  z-index: 16;
 }
 
 .stat-grid {

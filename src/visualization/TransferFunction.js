@@ -45,8 +45,8 @@ function stopPosition(q, key) {
 
 function colorStops(q, theme) {
   const stops = theme?.tfStops || [
-    ["0", "#02030a"], ["25", "#070b18"], ["50", "#111936"], ["75", "#28305f"],
-    ["90", "#4e3672"], ["95", "#854071"], ["99", "#c8688c"], ["1", "#f4e9ff"],
+    ["0", "#f2f6f7"], ["25", "#dcebed"], ["50", "#b7dad9"], ["75", "#74bbb7"],
+    ["90", "#0d8c8a"], ["95", "#38e1d6"], ["99", "#ffcc66"], ["1", "#fffaf0"],
   ];
   return stops.map(([p, color]) => ({ p: stopPosition(q, p), c: hexRGB(color) }));
 }

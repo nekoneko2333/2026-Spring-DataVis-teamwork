@@ -11,8 +11,8 @@ export class ProbePanel {
     this.colors = {
       density: "#7d8cff",
       densityFill: "rgba(125,140,255,0.16)",
-      flux: "#c8688c",
-      fluxFill: "rgba(200,104,140,0.13)",
+      flux: "#c06a09",
+      fluxFill: "rgba(192,106,9,0.12)",
     };
     this._build();
   }
