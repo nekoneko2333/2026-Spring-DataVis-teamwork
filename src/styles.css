@@ -807,13 +807,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .view-badges {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  pointer-events: none;
+  display: none;
 }
 
 .view-badges .badge {
@@ -919,17 +913,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 #app.story-mode .viewport-panel::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 10px 10px, rgba(45, 52, 54, 0.16) 0 1px, transparent 1.5px),
-    linear-gradient(115deg, transparent 0 58%, rgba(255, 255, 255, 0.28) 58% 59%, transparent 59%),
-    linear-gradient(245deg, transparent 0 64%, rgba(163, 177, 198, 0.24) 64% 65%, transparent 65%);
-  background-size: 28px 28px, 100% 100%, 100% 100%;
-  opacity: 0.42;
+  content: none;
 }
 
 #app.story-mode .viewport-toolbar {
@@ -987,7 +971,68 @@ input[type="range"]::-webkit-slider-thumb {
   font-family: "JetBrains Mono", "Roboto Mono", Consolas, monospace;
   font-size: 12px;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
+}
+
+
+#app.story-mode .network-inset {
+  position: absolute;
+  right: clamp(18px, 4vw, 56px);
+  bottom: clamp(42px, 9vh, 92px);
+  z-index: 17;
+  width: clamp(240px, 19vw, 320px);
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.70);
+  border-radius: 13px;
+  background: rgba(238, 243, 248, 0.88);
+  box-shadow: var(--shadow-floating);
+  backdrop-filter: blur(10px);
+}
+
+.network-inset.hidden {
+  display: none;
+}
+
+
+.network-inset svg {
+  display: block;
+  width: 100%;
+  aspect-ratio: 360 / 250;
+}
+
+.network-frame {
+  fill: rgba(246, 249, 252, 0.64);
+  stroke: rgba(124, 143, 166, 0.28);
+}
+
+.network-grid line {
+  stroke: rgba(74, 85, 104, 0.08);
+  stroke-width: 1;
+}
+
+.network-edges line {
+  stroke: #0d8c8a;
+  stroke-width: 1.15;
+  stroke-linecap: round;
+}
+
+.network-nodes .cluster {
+  fill: #d5a43f;
+  stroke: rgba(255, 250, 218, 0.85);
+  stroke-width: 1.15;
+}
+
+.network-nodes .junction {
+  fill: #38c8c2;
+  stroke: rgba(240, 255, 255, 0.72);
+  stroke-width: 0.8;
+}
+
+
+.network-inset-empty {
+  padding: 20px 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 #app.story-mode .view-badges {

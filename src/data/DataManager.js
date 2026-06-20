@@ -21,6 +21,8 @@ export class DataManager {
     this.labelCache = new Map();
     this.labelInflight = new Map();
     this.labelLimit = 6;
+    this.networkCache = new Map();
+    this.networkInflight = new Map();
     this.preview = null;
     this.previewGradient = null;
     this.previewTex = null;
@@ -247,6 +249,27 @@ export class DataManager {
     });
   }
 
+  getNetwork(step = 99) {
+    if (this.networkCache.has(step)) return Promise.resolve(this.networkCache.get(step));
+    if (this.networkInflight.has(step)) return this.networkInflight.get(step);
+    const url = `${DATA}/network/t${String(step).padStart(4, "0")}_graph.json`;
+    const p = fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Network graph not found: ${url}`);
+        return r.json();
+      })
+      .then((graph) => {
+        this.networkCache.set(step, graph);
+        this.networkInflight.delete(step);
+        return graph;
+      })
+      .catch((e) => {
+        this.networkInflight.delete(step);
+        throw e;
+      });
+    this.networkInflight.set(step, p);
+    return p;
+  }
   _putVolumeEntry(step, entry) {
     this.cache.set(step, entry);
     while (this.cache.size > this.cacheLimit) {

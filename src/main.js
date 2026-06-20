@@ -405,16 +405,18 @@ class App {
 
   // ---------------- step / playback ----------------
   async applyStep(step, { fromPlayback = false, force = false } = {}) {
+    const storyPlayback = fromPlayback && state.story.running;
     state.step = step;
     $("#timeSlider").value = step;
     $("#stepLabel").textContent = `t = ${String(step).padStart(4, "0")}`;
-    // 图表联动
-    this.histogram.update(step, state.histograms.matrix[step]);
-    this.fingerprint.update(step); this.series.update(step);
-    this.power.update(step); this.timeline.update(step);
-    this._updateStatGrid(step); this._updateMorph(step);
-    if (state.brush.active) this._updateSelStats(step);
-    if (this.histogram.tf) { /* recolored on tf change */ }
+    if (!storyPlayback) {
+      this.histogram.update(step, state.histograms.matrix[step]);
+      this.fingerprint.update(step); this.series.update(step);
+      this.power.update(step); this.timeline.update(step);
+      this._updateStatGrid(step); this._updateMorph(step);
+      if (state.brush.active) this._updateSelStats(step);
+      if (this.histogram.tf) { /* recolored on tf change */ }
+    }
 
     // 低分辨率即时显示
     this.renderer.setVolumeTexture(this.dm.getPreviewTexture(step));
@@ -628,6 +630,89 @@ class App {
     if (isFinite(lo)) this.histogram.setRangeNorm(lo, hi);
   }
 
+  _ensureNetworkInset() {
+    let el = $("#networkInset");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "networkInset";
+      el.className = "network-inset hidden";
+      $(".viewport-panel").appendChild(el);
+    }
+    return el;
+  }
+
+  _projectNetwork(graph) {
+    const visibleNodes = (graph.nodes || []).filter((n) => n.type === "cluster" || n.type === "junction");
+    const byId = new Map(visibleNodes.map((n) => [n.id, n]));
+    const edges = (graph.edges || [])
+      .filter((e) => (e.weight ?? 1) >= 0.28 && byId.has(e.source) && byId.has(e.target))
+      .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
+      .slice(0, 90);
+    return { nodes: visibleNodes, edges, byId };
+  }
+
+  async _showNetworkInset(step = 99) {
+    state.network.active = true;
+    state.network.step = step;
+    this.renderer.setNetworkActive(false);
+    const el = this._ensureNetworkInset();
+    try {
+      const graph = await this.dm.getNetwork(step);
+      if (!state.network.active) return null;
+      const { nodes, edges, byId } = this._projectNetwork(graph);
+      const w = 360;
+      const h = 250;
+      const xs = nodes.map((n) => n.center[0]);
+      const ys = nodes.map((n) => n.center[2]);
+      const x = d3.scaleLinear().domain(d3.extent(xs)).nice().range([30, w - 28]);
+      const y = d3.scaleLinear().domain(d3.extent(ys)).nice().range([h - 34, 28]);
+      const r = d3.scaleSqrt().domain([1, d3.max(nodes, (n) => n.voxelCount || 1) || 1]).range([2.5, 8]);
+
+      d3.select(el).html("");
+      el.classList.remove("hidden");
+      const svg = d3.select(el).append("svg")
+        .attr("viewBox", "0 0 " + w + " " + h)
+        .attr("role", "img")
+        .attr("aria-label", "\u5b87\u5b99\u7f51\u62d3\u6251\u6458\u8981");
+      svg.append("rect").attr("x", 1).attr("y", 1).attr("width", w - 2).attr("height", h - 2).attr("rx", 8).attr("class", "network-frame");
+      svg.append("g").attr("class", "network-grid")
+        .selectAll("line").data(d3.range(40, w, 40)).join("line")
+        .attr("x1", (d) => d).attr("x2", (d) => d).attr("y1", 16).attr("y2", h - 16);
+      svg.select(".network-grid").selectAll("line.h").data(d3.range(40, h, 40)).join("line")
+        .attr("class", "h").attr("x1", 16).attr("x2", w - 16).attr("y1", (d) => d).attr("y2", (d) => d);
+
+      svg.append("g").attr("class", "network-edges")
+        .selectAll("line").data(edges).join("line")
+        .attr("x1", (e) => x(byId.get(e.source).center[0]))
+        .attr("y1", (e) => y(byId.get(e.source).center[2]))
+        .attr("x2", (e) => x(byId.get(e.target).center[0]))
+        .attr("y2", (e) => y(byId.get(e.target).center[2]))
+        .attr("stroke-opacity", (e) => 0.18 + 0.42 * (e.weight ?? 0.5));
+
+      const node = svg.append("g").attr("class", "network-nodes")
+        .selectAll("circle").data(nodes).join("circle")
+        .attr("cx", (n) => x(n.center[0]))
+        .attr("cy", (n) => y(n.center[2]))
+        .attr("r", (n) => n.type === "cluster" ? r(n.voxelCount || 1) : 2.4)
+        .attr("class", (n) => n.type === "cluster" ? "cluster" : "junction");
+      node.append("title").text((n) => `${n.type} #${n.id}`);
+
+      return { graph, visibleNodes: nodes.length, visibleEdges: edges.length };
+    } catch (e) {
+      console.warn(e);
+      state.network.active = false;
+      d3.select(el).html(`<div class="network-inset-empty">\u8fd0\u884c python preprocess/network_graph.py \u751f\u6210\u7f51\u7edc\u6570\u636e</div>`);
+      el.classList.remove("hidden");
+      return null;
+    }
+  }
+
+  _hideNetwork() {
+    state.network.active = false;
+    this.renderer.setNetworkActive(false);
+    const el = $("#networkInset");
+    if (el) el.classList.add("hidden");
+  }
   _toggleStory() {
     if (state.story.running) { this._stopStory(); return; }
     this._startStory();
@@ -637,12 +722,17 @@ class App {
     state.story.running = true;
     this.pageBeforeStory = this.page;
     this.storyCameraPose = this.renderer.getCameraPose();
+    this.storyEdgesVisible = this.renderer.edges.visible;
+    this.renderer.edges.visible = false;
     this.renderer.setControlsEnabled(false);
     this._setPage("render");
     $("#app").classList.add("story-mode");
     $("#btnStory").textContent = "■ 停止";
     $("#storyCaption").classList.remove("hidden");
     this.pause(); this._clearBrush();
+    this.storyPrevStepCount = this.renderer.baseStepCount;
+    this.renderer.setSteps(Math.min(state.tf.steps, 96));
+    this.dm.getNetwork(99).catch(() => null);
     const cap = (chapter, text) => { $("#storyCaption").innerHTML = `<span class="chapter">${chapter}</span>${text}`; };
     const lerp = (a, b, t) => a + (b - a) * t;
     const ease = (t) => t * t * (3 - 2 * t);
@@ -658,6 +748,7 @@ class App {
       skim: { position: [-0.18, -0.18, 0.62], target: [0.14, 0.08, -0.02] },
       node: { position: [0.42, 0.30, 0.54], target: [-0.04, 0.02, 0.02] },
       atlas: { position: [1.08, -0.42, 0.78], target: [0.00, 0.00, 0.00] },
+      network: { position: [1.18, 0.18, 1.08], target: [0.00, 0.00, 0.00] },
     };
     const tweenCamera = (from, to, dur) => new Promise((res) => {
       const t0 = performance.now();
@@ -671,10 +762,19 @@ class App {
     });
     const tweenStep = (from, to, dur, cameraFrom, cameraTo) => new Promise((res) => {
       const t0 = performance.now();
+      const minStepMs = 72;
+      let lastStep = null;
+      let lastUpdate = 0;
       const run = () => {
         if (!state.story.running) return res();
-        const k = Math.min(1, (performance.now() - t0) / dur);
-        this.setStep(Math.round(from + (to - from) * k), { fromPlayback: true });
+        const now = performance.now();
+        const k = Math.min(1, (now - t0) / dur);
+        const step = Math.round(from + (to - from) * k);
+        if (step !== lastStep && (now - lastUpdate >= minStepMs || k >= 1)) {
+          lastStep = step;
+          lastUpdate = now;
+          this.setStep(step, { fromPlayback: true });
+        }
         if (cameraFrom && cameraTo) setShot(cameraFrom, cameraTo, k);
         if (k < 1) requestAnimationFrame(run); else res();
       };
@@ -700,17 +800,38 @@ class App {
       if (!state.story.running) return;
       cap("第四幕 · 宇宙图谱", "叠加形态学分类 (Cosmic Atlas): 节点、丝、墙与空洞被分层显示 —— 统计长尾与空间宇宙网一一对应。");
       this._setMode(0);
+      state.atlas.method = "tweb";
+      state.atlas.opacity = 0.42;
       if (!state.atlas.active) this._toggleAtlas();
-      await tweenCamera(shots.node, shots.atlas, 5200);
+      this.renderer.setAtlas(true, state.atlas.opacity, state.atlas.classes);
+      await tweenCamera(shots.node, shots.atlas, 3600);
+      if (!state.story.running) return;
+      const net = await this._showNetworkInset(99);
+      if (net) {
+        cap("\u7b2c\u4e94\u5e55 \u00b7 \u7f51\u7edc\u80cc\u540e", `\u53f3\u4fa7\u5c0f\u7a97\u5c06 T-web \u8282\u70b9\u4e0e\u4e1d\u72b6\u9aa8\u67b6\u62bd\u8c61\u4e3a\u62d3\u6251\u7f51\u7edc\uff1a\u4f53\u6e32\u67d3\u4fdd\u7559\u771f\u5b9e\u7a7a\u95f4\u7ed3\u6784\uff0c\u62d3\u6251\u56fe\u7528\u4e8e\u9605\u8bfb\u8282\u70b9\u3001\u8fde\u8fb9\u4e0e\u8fde\u901a\u6027\u3002\u5f53\u524d\u663e\u793a ${net.visibleNodes} \u4e2a\u5173\u952e\u8282\u70b9\u548c ${net.visibleEdges} \u6761\u9aa8\u67b6\u8fde\u8fb9\u3002`);
+      } else {
+        cap("\u7b2c\u4e94\u5e55 \u00b7 \u7f51\u7edc\u80cc\u540e", "\u5c1a\u672a\u751f\u6210\u7f51\u7edc\u9aa8\u67b6\u6570\u636e\uff1b\u8fd0\u884c python preprocess/network_graph.py \u540e\u5373\u53ef\u5728\u5c0f\u7a97\u4e2d\u663e\u793a\u62d3\u6251\u6458\u8981\u3002");
+      }
+      await tweenCamera(shots.atlas, shots.network, 3200);
+      await wait(1200);
       this._stopStory();
     })();
   }
 
   _stopStory() {
     state.story.running = false;
+    this._hideNetwork();
     clearTimeout(this._storyTimer);
     $("#app").classList.remove("story-mode");
     this.renderer.setControlsEnabled(true);
+    if (this.storyEdgesVisible != null) {
+      this.renderer.edges.visible = this.storyEdgesVisible;
+      this.storyEdgesVisible = null;
+    }
+    if (this.storyPrevStepCount != null) {
+      this.renderer.setSteps(this.storyPrevStepCount);
+      this.storyPrevStepCount = null;
+    }
     if (this.storyCameraPose) {
       this.renderer.setCameraPose(this.storyCameraPose.position, this.storyCameraPose.target);
       this.storyCameraPose = null;

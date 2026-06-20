@@ -1,9 +1,9 @@
 // Three.js 体渲染主视图: 透视相机 + OrbitControls + 光线步进 ShaderMaterial。
 // 负责场景/相机/交互与 uniform 更新, 并提供探针视线拾取(相机射线∩单位立方体)。
 import {
-  Scene, PerspectiveCamera, WebGLRenderer, BoxGeometry, Mesh, ShaderMaterial,
-  GLSL3, Vector3, Vector2, BackSide, DoubleSide, LineSegments, EdgesGeometry,
-  LineBasicMaterial, BufferGeometry, Line, AdditiveBlending,
+  Scene, PerspectiveCamera, WebGLRenderer, BoxGeometry, SphereGeometry, Mesh, ShaderMaterial,
+  GLSL3, Vector3, Vector2, BackSide, DoubleSide, Group, LineSegments, EdgesGeometry,
+  LineBasicMaterial, BufferGeometry, Line, AdditiveBlending, NormalBlending,
   Data3DTexture, RedFormat, RGBFormat, FloatType, NearestFilter, UnsignedByteType,
   MeshBasicMaterial, MeshStandardMaterial, AmbientLight, DirectionalLight, BufferAttribute, Float32BufferAttribute,
 } from "three";
@@ -117,6 +117,13 @@ export class VolumeRenderer {
     );
     this.scene.add(this.edges);
 
+    this.networkGroup = new Group();
+    this.networkGroup.visible = false;
+    this.networkGroup.renderOrder = 20;
+    this.networkEdgeLine = null;
+    this.networkNodeMeshes = [];
+    this.scene.add(this.networkGroup);
+
     // MC 真实网格(光照渲染)
     this.scene.add(new AmbientLight(0x4a6a9a, 0.9));
     this.keyLight = new DirectionalLight(0xe9ecff, 1.5); this.keyLight.position.set(1, 1.2, 0.8); this.scene.add(this.keyLight);
@@ -205,6 +212,83 @@ export class VolumeRenderer {
   }
 
   // MC 真实三角网格模式
+  setNetwork(graph, options = {}) {
+    this.clearNetwork();
+    if (!graph) return;
+    const showEdges = options.showEdges !== false;
+    const showNodes = options.showNodes !== false;
+    const opacity = options.opacity ?? 0.82;
+
+    if (showEdges) {
+      const pos = [];
+      for (const edge of graph.edges || []) {
+        if ((edge.weight ?? 1) < 0.28) continue;
+        const pts = edge.points || [];
+        for (let i = 1; i < pts.length; i++) pos.push(...pts[i - 1], ...pts[i]);
+      }
+      if (pos.length) {
+        const g = new BufferGeometry();
+        g.setAttribute("position", new Float32BufferAttribute(pos, 3));
+        const m = new LineBasicMaterial({
+          color: 0x0ea5a3,
+          transparent: true,
+          opacity: opacity * 0.42,
+          depthTest: false,
+          blending: NormalBlending,
+        });
+        this.networkEdgeLine = new LineSegments(g, m);
+        this.networkEdgeLine.renderOrder = 22;
+        this.networkGroup.add(this.networkEdgeLine);
+      }
+    }
+
+    if (showNodes) {
+      const sphere = new SphereGeometry(1, 14, 10);
+      for (const node of graph.nodes || []) {
+        if (node.type === "endpoint") continue;
+        const isCluster = node.type === "cluster";
+        const radius = isCluster
+          ? Math.min(0.026, Math.max(0.010, 0.006 + Math.sqrt(node.voxelCount || 1) * 0.00042))
+          : Math.min(0.010, Math.max(0.0045, 0.003 + Math.sqrt(node.voxelCount || 1) * 0.00022));
+        const color = isCluster ? 0xf2c766 : 0x5fd8d4;
+        const m = new MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: isCluster ? opacity * 0.68 : opacity * 0.48,
+          depthTest: false,
+          blending: NormalBlending,
+        });
+        const mesh = new Mesh(sphere, m);
+        mesh.position.set(node.center[0], node.center[1], node.center[2]);
+        mesh.scale.setScalar(radius);
+        mesh.renderOrder = 24;
+        this.networkGroup.add(mesh);
+        this.networkNodeMeshes.push(mesh);
+      }
+    }
+    this.networkGroup.visible = options.active !== false;
+  }
+
+  setNetworkActive(active, opacity = null) {
+    this.networkGroup.visible = active;
+    if (opacity == null) return;
+    if (this.networkEdgeLine) this.networkEdgeLine.material.opacity = opacity * 0.42;
+    for (const mesh of this.networkNodeMeshes) {
+      mesh.material.opacity = mesh.material.color.getHex() === 0xf2c766 ? opacity * 0.68 : opacity * 0.48;
+    }
+  }
+
+  clearNetwork() {
+    if (!this.networkGroup) return;
+    for (const child of [...this.networkGroup.children]) {
+      this.networkGroup.remove(child);
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) child.material.dispose();
+    }
+    this.networkEdgeLine = null;
+    this.networkNodeMeshes = [];
+  }
+  // MC ????????
   setMeshMode(on) {
     this.mcMesh.visible = on;
     this.mesh.visible = !on;

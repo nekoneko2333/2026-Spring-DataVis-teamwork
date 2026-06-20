@@ -36,8 +36,11 @@ export const state = {
   // 形态学叠加 (Cosmic Atlas); method: 'proxy'(density-Hessian) | 'tweb'(严格 T-web)
   atlas: { active: false, opacity: 0.55, method: "tweb", classes: { sheet: false, filament: true, node: true } },
 
-  // 探针
+  // Probe
   probe: { active: false, line: null, beta: 1.6, A: 0.55 },
+
+  // Story network overlay from T-web skeleton graph.
+  network: { active: false, step: 99, opacity: 0.82 },
 
   story: { running: false, chapter: 0 },
 };
