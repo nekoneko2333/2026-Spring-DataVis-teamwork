@@ -122,7 +122,7 @@ export class DataManager {
     const t = new Data3DTexture(f32, this.NX, this.NY, this.NZ);
     t.format = RedFormat;
     t.type = FloatType;
-    t.minFilter = t.magFilter = LinearFilter;
+    t.minFilter = t.magFilter = NearestFilter;
     t.wrapS = t.wrapT = t.wrapR = ClampToEdgeWrapping;
     t.needsUpdate = true;
     return t;
@@ -172,6 +172,12 @@ export class DataManager {
     return p;
   }
 
+  getCachedVolumeSet(step) {
+    if (!this.cache.has(step)) return null;
+    const entry = this.cache.get(step);
+    entry.ts = performance.now();
+    return entry;
+  }
   getVolumeTexture(step) {
     return this.getVolumeSet(step).then((entry) => entry.volumeTex);
   }

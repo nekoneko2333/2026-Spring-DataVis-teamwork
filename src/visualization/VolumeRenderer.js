@@ -44,10 +44,15 @@ export class VolumeRenderer {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
     this.controls.rotateSpeed = 0.8;
-    this.controls.minDistance = 0.7;
+    this.controls.minDistance = 0.42;
     this.controls.maxDistance = 6;
-    this.baseStepCount = 256;
-    this.interactionStepCount = 128;
+    this.controls.enableZoom = false;
+    this.smoothZoom = null;
+    this.zoomSettleTimer = null;
+    this.zoomEaseMs = 180;
+    this.zooming = false;
+    this.baseStepCount = 384;
+    this.interactionStepCount = 192;
     this.isInteracting = false;
     this.active = true;
     this.controls.addEventListener("start", () => {
@@ -115,6 +120,7 @@ export class VolumeRenderer {
       new EdgesGeometry(new BoxGeometry(1, 1, 1)),
       new LineBasicMaterial({ color: 0x2a496f, transparent: true, opacity: 0.5 })
     );
+    this.edges.visible = false;
     this.scene.add(this.edges);
 
     this.networkGroup = new Group();
@@ -141,6 +147,7 @@ export class VolumeRenderer {
     this.picking = false;
     this._raycastPlane = new Vector3();
     canvas.addEventListener("pointerdown", (e) => this._onPointerDown(e));
+    canvas.addEventListener("wheel", (e) => this._onWheel(e), { passive: false });
 
     this._resize();
     window.addEventListener("resize", () => this._resize());
@@ -308,6 +315,55 @@ export class VolumeRenderer {
   enablePicking(cb) { this.picking = true; this.pickCb = cb; this.canvas.style.cursor = "crosshair"; }
   disablePicking() { this.picking = false; this.canvas.style.cursor = ""; }
 
+  _onWheel(e) {
+    if (!this.controls.enabled || this.picking) return;
+    e.preventDefault();
+    const current = this.smoothZoom?.to ?? this.camera.position.distanceTo(this.controls.target);
+    const factor = Math.exp(Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 240) * 0.0018);
+    const next = Math.min(this.controls.maxDistance, Math.max(this.controls.minDistance, current * factor));
+    this._smoothZoomTo(next);
+  }
+
+  _smoothZoomTo(distance) {
+    const now = performance.now();
+    const from = this.camera.position.distanceTo(this.controls.target);
+    const current = this.smoothZoom;
+    this.smoothZoom = {
+      from,
+      to: distance,
+      t0: current ? Math.max(now - this.zoomEaseMs * 0.32, current.t0) : now,
+      dur: this.zoomEaseMs,
+    };
+    clearTimeout(this.zoomSettleTimer);
+    this.zooming = true;
+    this.isInteracting = true;
+    this._applyStepCount();
+  }
+
+  _finishSmoothZoom() {
+    this.smoothZoom = null;
+    clearTimeout(this.zoomSettleTimer);
+    this.zoomSettleTimer = setTimeout(() => {
+      this.zooming = false;
+      this.isInteracting = false;
+      this._applyStepCount();
+      if (this.onZoomSettled) this.onZoomSettled();
+    }, 90);
+  }
+
+  _applySmoothZoom() {
+    if (!this.smoothZoom) return;
+    const z = this.smoothZoom;
+    const k = Math.min(1, (performance.now() - z.t0) / z.dur);
+    const t = k * k * (3 - 2 * k);
+    const dist = z.from + (z.to - z.from) * t;
+    const dir = this.camera.position.clone().sub(this.controls.target);
+    if (dir.lengthSq() < 1e-8) dir.set(0, 0, 1);
+    dir.normalize();
+    this.camera.position.copy(this.controls.target).addScaledVector(dir, dist);
+    this.camera.lookAt(this.controls.target);
+    if (k >= 1) this._finishSmoothZoom();
+  }
   _intersectBox(ro, rd) {
     const bmin = -0.5, bmax = 0.5;
     let tn = -Infinity, tf = Infinity;
@@ -359,16 +415,18 @@ export class VolumeRenderer {
   }
 
   _applyStepCount() {
-    const steps = this.isInteracting
-      ? Math.min(this.baseStepCount, this.interactionStepCount)
-      : this.baseStepCount;
-    this.uniforms.uStepCount.value = steps;
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    const closeBoost = dist < 0.95 ? 1.6 : dist < 1.35 ? 1.28 : 1.0;
+    const qualitySteps = Math.round(this.baseStepCount * closeBoost);
+    const interactiveSteps = Math.min(qualitySteps, this.interactionStepCount);
+    this.uniforms.uStepCount.value = this.isInteracting ? interactiveSteps : qualitySteps;
   }
 
   _loop() {
     requestAnimationFrame(() => this._loop());
     if (!this.active) return;
     this.controls.update();
+    this._applySmoothZoom();
     this.uniforms.uCameraPos.value.copy(this.camera.position);
     this.uniforms.uTime.value = (performance.now() - this.clock0) / 1000;
     if (this.onFrame) this.onFrame();

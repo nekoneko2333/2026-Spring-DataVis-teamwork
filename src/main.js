@@ -42,6 +42,7 @@ class App {
     this.renderer = new VolumeRenderer($("#glcanvas"), meta, this.tf.texture);
     this.renderer.setHiClip(this.percent("99"));
     this.renderer.setLoClip(this.percent("25"));
+    this.renderer.onZoomSettled = () => this._refineCurrentStep();
     this._buildCharts();
     this._buildUI();
     this._bindEvents();
@@ -419,14 +420,19 @@ class App {
     }
 
     // 低分辨率即时显示
-    this.renderer.setVolumeTexture(this.dm.getPreviewTexture(step));
-    {
-      const previewGrad = this.dm.getPreviewGradientTexture(step);
-      this.renderer.setGradientTexture(previewGrad.texture, previewGrad.scale);
+    const cached = !fromPlayback ? this.dm.getCachedVolumeSet(step) : null;
+    if (cached) {
+      this.renderer.setVolumeTexture(cached.volumeTex);
+      this.renderer.setGradientTexture(cached.gradientTex, cached.gradientScale);
+      $("#loadState").textContent = "full-res";
+    } else {
+      this.renderer.setVolumeTexture(this.dm.getPreviewTexture(step));
+      {
+        const previewGrad = this.dm.getPreviewGradientTexture(step);
+        this.renderer.setGradientTexture(previewGrad.texture, previewGrad.scale);
+      }
+      $("#loadState").textContent = fromPlayback ? "preview playback" : "preview";
     }
-    $("#loadState").textContent = fromPlayback ? "○ 预览(播放)" : "○ 预览";
-
-    // 预取
     if (!fromPlayback) this.dm.prefetch(step, this._dir || 1, 2);
 
     if (state.renderMode === 5) this._scheduleMesh(step);
@@ -731,7 +737,7 @@ class App {
     $("#storyCaption").classList.remove("hidden");
     this.pause(); this._clearBrush();
     this.storyPrevStepCount = this.renderer.baseStepCount;
-    this.renderer.setSteps(Math.min(state.tf.steps, 96));
+    this.renderer.setSteps(Math.min(state.tf.steps, 160));
     this.dm.getNetwork(99).catch(() => null);
     const cap = (chapter, text) => { $("#storyCaption").innerHTML = `<span class="chapter">${chapter}</span>${text}`; };
     const lerp = (a, b, t) => a + (b - a) * t;
