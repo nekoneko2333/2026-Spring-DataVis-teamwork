@@ -21,6 +21,7 @@ class App {
     this.dm = new DataManager();
     this.fullResTimer = null;
     this.labelTimer = null;
+    this.playTimer = null;
     this.lastStepTime = 0;
     this.stepInterval = 78; // ms, ≈13 步/s 播放
     this.playbackSteps = 88; // 播放时降低 ray-march 步进数(弱机更流畅)
@@ -41,8 +42,6 @@ class App {
     this.renderer = new VolumeRenderer($("#glcanvas"), meta, this.tf.texture);
     this.renderer.setHiClip(this.percent("99"));
     this.renderer.setLoClip(this.percent("25"));
-    this.renderer.onFrame = () => this._tick();
-
     this._buildCharts();
     this._buildUI();
     this._bindEvents();
@@ -494,26 +493,29 @@ class App {
 
   togglePlay() { state.playing ? this.pause() : this.play(); }
   play() {
-    state.playing = true; $("#btnPlay").textContent = "❚❚"; this.lastStepTime = performance.now();
-    this.renderer.setSteps(Math.min(state.tf.steps, this.playbackSteps));  // 播放降步进保帧率
+    if (state.playing) return;
+    state.playing = true;
+    $("#btnPlay").textContent = "❚❚";
+    this.renderer.setSteps(Math.min(state.tf.steps, this.playbackSteps));
+    clearInterval(this.playTimer);
+    this.playTimer = setInterval(() => this._tick(), this.stepInterval);
   }
   pause() {
     if (!state.playing) return;
-    state.playing = false; $("#btnPlay").textContent = "▶";
-    this.renderer.setSteps(state.tf.steps);       // 恢复高质量步进
-    this._scheduleFullRes(state.step);            // 暂停后补全分辨率
+    state.playing = false;
+    $("#btnPlay").textContent = "▶";
+    clearInterval(this.playTimer);
+    this.playTimer = null;
+    this.renderer.setSteps(state.tf.steps);
+    this._scheduleFullRes(state.step);
     if (state.atlas.active) this._scheduleLabel(state.step);
   }
 
   _tick() {
     if (!state.playing) return;
-    const now = performance.now();
-    if (now - this.lastStepTime >= this.stepInterval) {
-      this.lastStepTime = now;
-      this._dir = 1;
-      const next = (state.step + 1) % state.meta.timeSteps;
-      this.applyStep(next, { fromPlayback: true });
-    }
+    this._dir = 1;
+    const next = (state.step + 1) % state.meta.timeSteps;
+    this.applyStep(next, { fromPlayback: true });
   }
 
   // ---------------- mode / brush ----------------
@@ -638,10 +640,6 @@ class App {
     this.renderer.setControlsEnabled(false);
     this._setPage("render");
     $("#app").classList.add("story-mode");
-    const appEl = $("#app");
-    if (appEl.requestFullscreen && !document.fullscreenElement) {
-      appEl.requestFullscreen().catch(() => {});
-    }
     $("#btnStory").textContent = "■ 停止";
     $("#storyCaption").classList.remove("hidden");
     this.pause(); this._clearBrush();
@@ -716,9 +714,6 @@ class App {
     if (this.storyCameraPose) {
       this.renderer.setCameraPose(this.storyCameraPose.position, this.storyCameraPose.target);
       this.storyCameraPose = null;
-    }
-    if (document.fullscreenElement === $("#app") && document.exitFullscreen) {
-      document.exitFullscreen().catch(() => {});
     }
     $("#btnStory").textContent = "▶ Story Mode";
     $("#storyCaption").classList.add("hidden");
