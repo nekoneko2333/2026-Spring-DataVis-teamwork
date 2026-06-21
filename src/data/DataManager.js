@@ -209,14 +209,21 @@ export class DataManager {
     candidates.sort((a, b) => b.score - a.score);
     const nodes = candidates.slice(0, config.maxPoints);
     const points = new Float32Array(nodes.length * 3);
+    const pointColors = new Float32Array(nodes.length * 3);
     nodes.forEach((p, i) => {
       points[i * 3] = p.x;
       points[i * 3 + 1] = p.y;
       points[i * 3 + 2] = p.z;
+      const k = Math.max(0, Math.min(1, (p.d - 0.24) / 0.34));
+      const b = 0.38 + 0.54 * Math.pow(k, 0.72);
+      pointColors[i * 3] = b;
+      pointColors[i * 3 + 1] = b;
+      pointColors[i * 3 + 2] = b;
     });
 
     const degrees = new Uint16Array(nodes.length);
     const edges = [];
+    const edgeColors = [];
     const seen = new Set();
     const addEdge = (i, j) => {
       if (i === j) return;
@@ -228,6 +235,15 @@ export class DataManager {
       const pa = nodes[a];
       const pb = nodes[b];
       edges.push(pa.x, pa.y, pa.z, pb.x, pb.y, pb.z);
+      const dx = pa.x - pb.x;
+      const dy = pa.y - pb.y;
+      const dz = pa.z - pb.z;
+      const len = Math.hypot(dx, dy, dz);
+      const density = Math.max(0, Math.min(1, ((pa.d + pb.d) * 0.5 - 0.22) / 0.38));
+      const lengthPenalty = Math.min(0.42, len / Math.max(config.radius, 1e-3) * 0.18);
+      const strength = Math.max(0.16, Math.min(1, density - lengthPenalty));
+      const edgeBrightness = 0.22 + 0.56 * Math.pow(strength, 0.82);
+      edgeColors.push(edgeBrightness, edgeBrightness, edgeBrightness, edgeBrightness, edgeBrightness, edgeBrightness);
       degrees[a]++;
       degrees[b]++;
     };
@@ -266,6 +282,8 @@ export class DataManager {
       model,
       points,
       lines: new Float32Array(edges),
+      pointColors,
+      lineColors: new Float32Array(edgeColors),
       pointCount: nodes.length,
       lineCount: edges.length / 6,
       degreeBins,

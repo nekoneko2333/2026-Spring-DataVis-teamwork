@@ -3255,3 +3255,66 @@ input[type="range"] {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
 }
+
+/* Render presets and noise reduction pass. */
+.render-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 9px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.render-presets button {
+  min-height: 22px;
+  padding: 0 0 4px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.render-presets button:hover,
+.render-presets button.active {
+  color: rgba(255, 255, 255, 0.92);
+  border-bottom-color: rgba(255, 255, 255, 0.68);
+}
+
+#app[data-page="render"] .dataset-strip,
+#app[data-page="render"] .brand .titles p,
+#app[data-page="render"] #viewBadges {
+  display: none;
+}
+
+#app[data-page="render"] #topbar {
+  grid-template-columns: 220px minmax(0, 1fr) 120px;
+}
+
+#app[data-page="render"] .panel-head span {
+  opacity: 0;
+}
+
+#app[data-page="render"] #left,
+#app[data-page="render"] #right {
+  opacity: 0.78;
+  transition: opacity 160ms ease;
+}
+
+#app[data-page="render"] #left:hover,
+#app[data-page="render"] #right:hover,
+#app[data-page="render"] #left:focus-within,
+#app[data-page="render"] #right:focus-within {
+  opacity: 1;
+}
+
+#app[data-page="render"] .stat-cell .k,
+#app[data-page="render"] .morph-row .name,
+#app[data-page="render"] .morph-row .pct,
+#app[data-page="render"] .network-rule,
+#app[data-page="render"] .component-label {
+  color: rgba(255, 255, 255, 0.42);
+}

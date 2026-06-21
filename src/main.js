@@ -31,6 +31,7 @@ class App {
     this.chapterFxTimer = null;
     this.networkModel = "fixed";
     this.networkVisible = true;
+    this.renderPreset = "structure";
     this.storyExporting = false;
     this.tabCharts = {};
     this.page = "render";
@@ -446,15 +447,44 @@ class App {
   }
 
   _applyRecommendedTF() {
-    state.tf.densityScale = 0.80;
-    state.tf.steps = 256;
-    state.tf.isoValue = 0.40;
+    this._applyRenderPreset("structure");
+  }
 
-    this.tf.setRecommendedStable(this.theme);
+  _applyRenderPreset(name = "structure") {
+    const presets = {
+      structure: { mode: 0, density: 0.80, steps: 256, iso: 0.40, alpha: "structure", brush: null, atlas: false },
+      evolution: { mode: 0, density: 1.18, steps: 288, iso: 0.40, alpha: "evolution", brush: null, atlas: false },
+      dense: { mode: 3, density: 1.02, steps: 256, iso: 0.54, alpha: "dense", brush: null, atlas: false },
+      void: { mode: 4, density: 0.92, steps: 256, iso: 0.28, alpha: "void", brush: null, atlas: false },
+    };
+    const p = presets[name] || presets.structure;
+    this.renderPreset = name;
+    state.tf.densityScale = p.density;
+    state.tf.steps = p.steps;
+    state.tf.isoValue = p.iso;
+    state.atlas.active = p.atlas;
+
+    this.tf.setAlphaProfile(p.alpha);
     this.renderer.setDensityScale(state.tf.densityScale);
     this.renderer.setSteps(state.playing ? Math.min(state.tf.steps, this.playbackSteps) : state.tf.steps);
     this.renderer.setIso(state.tf.isoValue);
+    this.renderer.setAtlas(state.atlas.active, state.atlas.opacity, state.atlas.classes);
+    $("#btnAtlas").classList.toggle("active", state.atlas.active);
 
+    this._clearBrush();
+    this._setMode(p.mode);
+    if (p.brush && p.mode === 0) {
+      const ranges = {
+        void: [0, this.percent("25")],
+        top1: [this.percent("99"), 1],
+      };
+      const [min, max] = ranges[p.brush];
+      state.brush = { active: true, min, max, label: p.brush };
+      this.renderer.setBrush(true, min, max);
+      this.histogram.setRangeNorm(min, max);
+    }
+
+    document.querySelectorAll("#renderPresets button").forEach((b) => b.classList.toggle("active", b.dataset.preset === name));
     this._syncTFControls();
     this._refreshTFViews();
     this._renderTFEditor();
@@ -486,18 +516,25 @@ class App {
     });
 
     $("#tfRecommend").addEventListener("click", () => this._applyRecommendedTF());
+    $("#renderPresets").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      this._applyRenderPreset(b.dataset.preset);
+    });
 
     $("#densityScale").addEventListener("input", (e) => {
       state.tf.densityScale = +e.target.value;
       this.renderer.setDensityScale(state.tf.densityScale);
+      document.querySelectorAll("#renderPresets button").forEach((b) => b.classList.remove("active"));
     });
     $("#stepQuality").addEventListener("input", (e) => {
       state.tf.steps = +e.target.value;
       this.renderer.setSteps(state.playing ? Math.min(state.tf.steps, this.playbackSteps) : state.tf.steps);
+      document.querySelectorAll("#renderPresets button").forEach((b) => b.classList.remove("active"));
     });
     $("#isoValue").addEventListener("input", (e) => {
       state.tf.isoValue = +e.target.value;
       this.renderer.setIso(state.tf.isoValue);
+      document.querySelectorAll("#renderPresets button").forEach((b) => b.classList.remove("active"));
     });
 
     // atlas

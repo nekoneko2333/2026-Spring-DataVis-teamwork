@@ -128,8 +128,9 @@ export class VolumeRenderer {
     this.networkLineMaterial = new LineBasicMaterial({
       color: 0xffffff,
       transparent: true,
-      opacity: 0.32,
+      opacity: 0.22,
       depthWrite: false,
+      vertexColors: true,
       blending: AdditiveBlending,
     });
     this.networkPointMaterial = new PointsMaterial({
@@ -137,8 +138,9 @@ export class VolumeRenderer {
       size: 0.008,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.92,
+      opacity: 0.70,
       depthWrite: false,
+      vertexColors: true,
       blending: AdditiveBlending,
     });
     this.networkLines = new LineSegments(new BufferGeometry(), this.networkLineMaterial);
@@ -245,6 +247,8 @@ export class VolumeRenderer {
     const pointGeometry = new BufferGeometry();
     if (network?.lines?.length) lineGeometry.setAttribute("position", new Float32BufferAttribute(network.lines, 3));
     if (network?.points?.length) pointGeometry.setAttribute("position", new Float32BufferAttribute(network.points, 3));
+    if (network?.lineColors?.length) lineGeometry.setAttribute("color", new Float32BufferAttribute(network.lineColors, 3));
+    if (network?.pointColors?.length) pointGeometry.setAttribute("color", new Float32BufferAttribute(network.pointColors, 3));
     this.networkLines.geometry = lineGeometry;
     this.networkPoints.geometry = pointGeometry;
     oldLines?.dispose();

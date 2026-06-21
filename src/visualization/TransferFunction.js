@@ -51,11 +51,26 @@ function colorStops(q, theme) {
   return stops.map(([p, color]) => ({ p: stopPosition(q, p), c: hexRGB(color) }));
 }
 
-function alphaStops(q) {
-  return [
-    { p: 0.0, a: 0.0 }, { p: q.q25, a: 0.0 }, { p: q.q50, a: 0.0 }, { p: q.q75, a: 0.020 },
-    { p: q.q90, a: 0.110 }, { p: q.q95, a: 0.285 }, { p: q.q99, a: 0.62 }, { p: 1.0, a: 0.88 },
-  ];
+function alphaStops(q, profile = "structure") {
+  const profiles = {
+    structure: [
+      [0.0, 0.0], [q.q25, 0.0], [q.q50, 0.0], [q.q75, 0.020],
+      [q.q90, 0.110], [q.q95, 0.285], [q.q99, 0.62], [1.0, 0.88],
+    ],
+    evolution: [
+      [0.0, 0.0], [q.q25, 0.006], [q.q50, 0.020], [q.q75, 0.070],
+      [q.q90, 0.180], [q.q95, 0.350], [q.q99, 0.66], [1.0, 0.90],
+    ],
+    dense: [
+      [0.0, 0.0], [q.q25, 0.0], [q.q50, 0.0], [q.q75, 0.0],
+      [q.q90, 0.050], [q.q95, 0.220], [q.q99, 0.70], [1.0, 0.94],
+    ],
+    void: [
+      [0.0, 0.125], [q.q25, 0.080], [q.q50, 0.020], [q.q75, 0.0],
+      [q.q90, 0.0], [q.q95, 0.0], [q.q99, 0.0], [1.0, 0.0],
+    ],
+  };
+  return (profiles[profile] || profiles.structure).map(([p, a]) => ({ p, a }));
 }
 
 function clamp01(v) { return Math.max(0, Math.min(1, v)); }
@@ -81,13 +96,21 @@ export class TransferFunction {
     this.texture.minFilter = this.texture.magFilter = LinearFilter;
     this.texture.wrapS = this.texture.wrapT = ClampToEdgeWrapping;
     this.theme = null;
+    this.alphaProfile = "structure";
     this.setRecommendedStable();
   }
 
   setRecommendedStable(theme = this.theme) {
     if (theme) this.theme = theme;
+    this.alphaProfile = "structure";
     this.colorAnchors = colorStops(this.q, this.theme).map((s) => ({ p: s.p, c: [...s.c] }));
-    this.alphaAnchors = alphaStops(this.q).map((s) => ({ p: s.p, a: s.a }));
+    this.alphaAnchors = alphaStops(this.q, this.alphaProfile).map((s) => ({ p: s.p, a: s.a }));
+    this.build();
+  }
+
+  setAlphaProfile(profile = "structure") {
+    this.alphaProfile = profile;
+    this.alphaAnchors = alphaStops(this.q, profile).map((s) => ({ p: s.p, a: s.a }));
     this.build();
   }
 

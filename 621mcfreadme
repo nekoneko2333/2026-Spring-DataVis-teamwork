@@ -133,6 +133,58 @@
   - 手动拖动和自动播放在同一时间步附近看到的拓扑/体渲染差异应接近。
   - 首页短片从 `STAGE 01` 开始就应有拓扑，并随时间变化。
 
+### 4. 展示性优化：体渲染预设、拓扑编码、界面减噪
+
+本轮按用户确认的方向继续做了 3/4/5 三类优化。
+
+体渲染预设：
+
+- 在 `index.html` 的传递函数区域新增 `renderPresets`：
+  - `结构`
+  - `演化`
+  - `高密度`
+  - `空洞`
+- 在 `src/visualization/TransferFunction.js` 增加 `setAlphaProfile(profile)`。
+- 新增 4 套 alpha profile：
+  - `structure`：原推荐黑白结构风格。
+  - `evolution`：提高中低密度 alpha，让播放时体渲染变化更容易被看见。
+  - `dense`：压低中密度，只强调高密度节点/丝。
+  - `void`：反向显示低密度区域，用于空洞观察。
+- 在 `src/main.js` 增加 `_applyRenderPreset(name)`：
+  - 同步 render mode。
+  - 同步 densityScale / steps / isoValue。
+  - 同步 transfer function。
+  - 同步 UI slider 和 TF editor。
+
+拓扑视觉编码：
+
+- 在 `src/data/DataManager.js` 的 `buildNetwork()` 中为拓扑生成：
+  - `pointColors`：节点亮度随节点密度变化。
+  - `lineColors`：边亮度随连接强度变化，连接越强越亮，长弱连接更暗。
+- 在 `src/visualization/VolumeRenderer.js` 中开启拓扑 `vertexColors`。
+- 降低拓扑整体 opacity，避免白色网络压过黑白体渲染。
+- 当前含义：
+  - 节点更亮 = 局部密度更高。
+  - 边更亮 = 两端密度更高且连接更紧。
+
+界面减噪：
+
+- 渲染页隐藏顶部 dataset strip、品牌副标题和视口 badges。
+- 渲染页侧栏默认稍微降透明度，hover/focus 时恢复。
+- 渲染页 panel 的英文副标题弱化。
+- 预设按钮采用白字 + 细线，不使用方框按钮，保持克制风格。
+
+验证状态：
+
+- `npm run build` 已通过。
+- 需要人工浏览器复核：
+  - 传递函数区域是否出现 4 个预设。
+  - `演化` 预设下播放体渲染变化是否比 `结构` 更明显。
+  - `高密度` 是否突出节点/高密度结构。
+  - `空洞` 是否能看出低密度区域。
+  - 拓扑是否更克制，且节点/边有亮度层次。
+  - 渲染页是否比之前更干净。
+
 ## 已确认的其他状态
 
 - 固定 MP4/WebM 短片方案已取消。
@@ -178,12 +230,17 @@
    - 对比 step 0、20、40 的体渲染截图，判断是数据本身变化慢，还是 preview texture 没刷新。
    - 如果仍不明显，下一步可考虑给播放添加轻微时间差分增强或关键帧插值，但要避免破坏真实数据含义。
 
+   额外检查预设：
+   - 点击 `演化` 预设，看中低密度结构是否比 `结构` 预设更可见。
+   - 如果 `演化` 仍不明显，可以继续小幅提高 `TransferFunction.js` 里 `evolution` profile 的 `q50/q75/q90` alpha。
+
 2. 如果用户仍说“中间拓扑不随时间变”
    - 检查 `window.__app.networkVisible`。
    - 检查 `window.__app.renderer.networkVisible`。
    - 检查 `window.__app.renderer.networkLines.visible` 和 `networkPoints.visible`。
    - 检查 `#btnTopology.classList.contains("active")`。
    - 检查 `window.__app.currentNetwork.step` 是否等于当前 slider step。
+   - 检查 network geometry 是否带 `color` attribute，拓扑亮度层次来自 `pointColors/lineColors`。
 
 3. 如果用户仍说“时间控制播放不了”
    - 先确认用户是否已经点了“进入数据探索”。
