@@ -6,7 +6,7 @@
     <title>Nyx Cosmic Explorer - 宇宙学体数据可视分析</title>
   </head>
   <body>
-    <div id="app" data-page="render">
+    <div id="app" data-page="showcase">
       <header id="topbar">
         <div class="brand">
           <div class="logo">N</div>
@@ -17,10 +17,10 @@
         </div>
 
         <nav class="page-tabs" id="pageTabs" aria-label="页面">
-          <button data-page="render" class="active">体渲染</button>
-          <button data-page="stats">统计演化</button>
-          <button data-page="brush">刷选联动</button>
-          <button data-page="web">形态结构</button>
+          <button data-page="showcase" class="active">展示</button>
+          <button data-page="explore">探索</button>
+          <button data-page="params">参数</button>
+          <button data-page="charts">图表</button>
         </nav>
 
         <div class="dataset-strip" aria-label="数据摘要">
@@ -33,8 +33,8 @@
       <aside id="left" class="sidebar sidebar-left">
         <section class="panel timeline-panel">
           <header class="panel-head">
-            <h2>时间控制</h2>
-            <span>Time evolution</span>
+            <h2 id="timelinePanelTitle">时间</h2>
+            <span id="timelinePanelSub">Time evolution</span>
             <button id="timelineLayout" class="mini-toggle">螺旋</button>
           </header>
           <div class="playback">
@@ -45,14 +45,21 @@
               <span id="loadState"></span>
             </div>
           </div>
+          <div class="stage-jumps" id="stageJumps" aria-label="阶段跳转">
+            <button data-step="0" class="active">初始</button>
+            <button data-step="14">片层</button>
+            <button data-step="38">丝状</button>
+            <button data-step="66">节点</button>
+            <button data-step="88">空洞</button>
+          </div>
           <div id="timelineChart" class="chart-host"></div>
           <div class="legend-mini" id="timelineLegend"></div>
         </section>
 
         <section class="panel tf-panel">
           <header class="panel-head">
-            <h2>传递函数</h2>
-            <span>Transfer function</span>
+            <h2 id="tfPanelTitle">视图</h2>
+            <span id="tfPanelSub">View preset</span>
           </header>
           <div id="tfEditor" class="chart-host"></div>
           <div class="render-presets" id="renderPresets" aria-label="体渲染预设">
@@ -85,7 +92,7 @@
             </div>
 
             <div class="top-actions">
-              <button id="btnStory" class="action">Story</button>
+              <button id="btnStory" class="action">短片</button>
               <button id="btnExport" class="action">导出</button>
               <button id="btnTopology" class="action active">拓扑</button>
               <button id="btnProbe" class="action">Probe</button>
@@ -109,8 +116,8 @@
       <aside id="right" class="sidebar sidebar-right">
         <section class="panel stat-panel">
           <header class="panel-head">
-            <h2>当前统计</h2>
-            <span>Current step</span>
+            <h2 id="statPanelTitle">状态</h2>
+            <span id="statPanelSub">Current step</span>
           </header>
           <div id="statGrid" class="stat-grid"></div>
         </section>
@@ -125,8 +132,8 @@
 
         <section class="panel morph-panel">
           <header class="panel-head">
-            <h2>宇宙网形态</h2>
-            <span>Cosmic web</span>
+            <h2 id="morphPanelTitle">拓扑</h2>
+            <span id="morphPanelSub">Cosmic web</span>
           </header>
           <div id="morphBars" class="morph-bars"></div>
           <div class="atlas-controls" id="atlasControls"></div>

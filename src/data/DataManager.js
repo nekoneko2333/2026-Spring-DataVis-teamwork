@@ -288,7 +288,7 @@ export class DataManager {
       lineCount: edges.length / 6,
       degreeBins,
       averageDegree: degrees.length ? degreeSum / degrees.length : 0,
-      componentLabel: model === "fixed" ? "Fixed Component" : model === "varying" ? "Variable Component" : "Weak Component",
+      componentLabel: model === "fixed" ? "定长连接" : model === "varying" ? "自适应连接" : "近邻连接",
     };
     this.networkCache.set(key, network);
     while (this.networkCache.size > this.networkCacheLimit) this.networkCache.delete(this.networkCache.keys().next().value);

@@ -34,7 +34,7 @@ class App {
     this.renderPreset = "structure";
     this.storyExporting = false;
     this.tabCharts = {};
-    this.page = "render";
+    this.page = "showcase";
     this.themeName = DEFAULT_THEME;
     this.theme = THEMES[this.themeName];
     this.storyProgressFrame = null;
@@ -55,7 +55,7 @@ class App {
     this._buildUI();
     this._bindEvents();
     this._applyTheme(this.themeName);
-    this._setPage("render");
+    this._setPage("showcase");
 
     await this.applyStep(0, { force: true });
     this._setView(0);
@@ -94,8 +94,8 @@ class App {
       this._timelineLegendHTML();
     // 统计格
     this.statKeys = [
-      ["max", "max log ρ", "gold"], ["mean", "mean", ""], ["std", "std", ""], ["median", "median", ""],
-      ["skewness", "偏度", "cyan"], ["kurtosis", "峰度", "cyan"], ["gini", "Gini", "gold"], ["entropy", "熵", "cyan"],
+      ["max", "max ρ", "gold"], ["mean", "mean", ""], ["std", "std", ""], ["median", "median", ""],
+      ["skewness", "skew", "cyan"], ["kurtosis", "kurt", "cyan"], ["gini", "Gini", "gold"], ["entropy", "entropy", "cyan"],
     ];
     $("#statGrid").innerHTML = this.statKeys.map(([k, lbl, cls]) =>
       `<div class="stat-cell"><div class="k">${lbl}</div><div class="v ${cls}" id="stat-${k}">—</div></div>`).join("");
@@ -105,16 +105,17 @@ class App {
       `<div class="morph-row"><span class="name">${lbl}</span><div class="bar"><div id="morph-${k}" style="background:${c}"></div></div><span class="pct" id="morphpct-${k}">—</span></div>`).join("");
     // atlas 控制
     $("#atlasControls").innerHTML = `
+      <div class="topology-hint"><span>亮节点 = 高密度</span><span>亮边 = 强连接</span></div>
       <div class="network-models" id="networkModels">
-        <h3>Network Models</h3>
-        <button data-model="fixed" class="active">Fixed Length</button>
-        <button data-model="varying">Varying Length</button>
-        <button data-model="nearest">Nearest Neighbor</button>
-        <div class="network-rule" id="networkRule">rule: d <= fixed radius</div>
+        <h3>拓扑模型</h3>
+        <button data-model="fixed" class="active">定长</button>
+        <button data-model="varying">自适应</button>
+        <button data-model="nearest">近邻</button>
+        <div class="network-rule" id="networkRule">固定半径</div>
       </div>
       <div class="degree-panel">
-        <h3>Average Degree</h3>
-        <div class="component-label" id="componentLabel">Weak Component</div>
+        <h3>平均度</h3>
+        <div class="component-label" id="componentLabel">弱连接</div>
         <div id="degreeChart" class="degree-chart"></div>
         <div class="degree-readout"><span>k</span><strong id="degreeValue">—</strong></div>
       </div>
@@ -137,7 +138,7 @@ class App {
     this._syncTFControls();
     this._prepareCinematicMetrics();
     this._buildCinematicOverlay();
-    $("#btnStory").textContent = "生成短片";
+    $("#btnStory").textContent = "短片";
   }
 
   _timelineLegendHTML() {
@@ -384,9 +385,9 @@ class App {
     overlay.appendChild(skip);
     viewport.appendChild(overlay);
     $("#cinemaStart").addEventListener("click", () => { void this._startStory(); });
-    $("#cinemaExploreHome").addEventListener("click", () => this._exitCinematic({ restoreCamera: false, page: "render" }));
+    $("#cinemaExploreHome").addEventListener("click", () => this._exitCinematic({ restoreCamera: false, page: "explore" }));
     $("#cinemaReplay").addEventListener("click", () => { void this._startStory(); });
-    $("#cinemaExplore").addEventListener("click", () => this._exitCinematic({ restoreCamera: false, page: "render" }));
+    $("#cinemaExplore").addEventListener("click", () => this._exitCinematic({ restoreCamera: false, page: "explore" }));
     $("#cinemaSkip").addEventListener("click", () => this._finishCinematic());
   }
 
@@ -413,6 +414,19 @@ class App {
     if (step < 66) return "丝状连接";
     if (step < 88) return "节点增长";
     return "空洞成熟";
+  }
+
+  _stageIndexForStep(step) {
+    if (step < 16) return 0;
+    if (step < 38) return 1;
+    if (step < 66) return 2;
+    if (step < 88) return 3;
+    return 4;
+  }
+
+  _updateStageJumps(step = state.step) {
+    const idx = this._stageIndexForStep(step);
+    document.querySelectorAll("#stageJumps button").forEach((b, i) => b.classList.toggle("active", i === idx));
   }
 
   _updateCinematicHUD(step = state.step) {
@@ -494,11 +508,24 @@ class App {
   _bindEvents() {
     $("#pageTabs").addEventListener("click", (e) => {
       const b = e.target.closest("button"); if (!b) return;
-      this._setPage(b.dataset.page);
+      const page = b.dataset.page;
+      if (page === "showcase") {
+        this._enterCinematicHome();
+      } else if (state.story.running || $("#app").classList.contains("story-mode")) {
+        this._exitCinematic({ restoreCamera: false, restorePage: false, restoreRenderState: false, page });
+      } else {
+        this._setPage(page);
+      }
     });
 
     $("#timeSlider").addEventListener("input", (e) => { this.pause(); this.setStep(+e.target.value); });
     $("#btnPlay").addEventListener("click", () => this.togglePlay());
+    $("#stageJumps").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      this.pause();
+      this.setStep(+b.dataset.step);
+      if (this.page === "showcase") this._setPage("explore");
+    });
 
     $("#modeTabs").addEventListener("click", (e) => {
       const b = e.target.closest("button"); if (!b) return;
@@ -596,18 +623,21 @@ class App {
   }
 
   _setPage(page) {
-    const pages = new Set(["render", "stats", "brush", "web"]);
-    if (!pages.has(page)) page = "render";
+    const legacy = { render: "explore", stats: "charts", brush: "params", web: "explore" };
+    page = legacy[page] || page;
+    const pages = new Set(["showcase", "explore", "params", "charts"]);
+    if (!pages.has(page)) page = "explore";
     this.page = page;
     $("#app").dataset.page = page;
-    if (this.renderer) this.renderer.setActive(page !== "stats");
+    if (this.renderer) this.renderer.setActive(page !== "charts");
+    this._syncPageChrome(page);
     document.querySelectorAll("#pageTabs button").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
 
     const preferredTab = {
-      render: this._tab || "hist",
-      stats: this._tab && this._tab !== "probe" ? this._tab : "fingerprint",
-      brush: this._tab === "probe" ? "probe" : "hist",
-      web: this._tab === "power" ? "power" : "series",
+      showcase: this._tab || "hist",
+      explore: this._tab || "hist",
+      params: this._tab === "probe" ? "probe" : "hist",
+      charts: this._tab && this._tab !== "probe" ? this._tab : "fingerprint",
     }[page];
     this._setTab(preferredTab);
 
@@ -620,6 +650,7 @@ class App {
     state.step = step;
     $("#timeSlider").value = step;
     $("#stepLabel").textContent = `t = ${String(step).padStart(4, "0")}`;
+    this._updateStageJumps(step);
     if (state.story.running || $("#app").classList.contains("story-mode")) this._updateCinematicHUD(step);
     const skipChartUpdates = fromPlayback && state.story.running;
     if (!skipChartUpdates) {
@@ -726,6 +757,31 @@ class App {
     this.dm.prefetch(state.step, 1, Math.max(8, this.playbackStride * 4));
     clearInterval(this.playTimer);
     this.playTimer = setInterval(() => this._tick(), this.stepInterval);
+  }
+
+  _syncPageChrome(page = this.page) {
+    const compact = page === "explore";
+    const labels = compact
+      ? {
+          timeline: ["时间", ""],
+          tf: ["视图", ""],
+          stat: ["状态", ""],
+          morph: ["拓扑", ""],
+        }
+      : {
+          timeline: ["时间控制", "Time evolution"],
+          tf: ["传递函数", "Transfer function"],
+          stat: ["当前统计", "Current step"],
+          morph: ["宇宙网形态", "Cosmic web"],
+        };
+    $("#timelinePanelTitle").textContent = labels.timeline[0];
+    $("#timelinePanelSub").textContent = labels.timeline[1];
+    $("#tfPanelTitle").textContent = labels.tf[0];
+    $("#tfPanelSub").textContent = labels.tf[1];
+    $("#statPanelTitle").textContent = labels.stat[0];
+    $("#statPanelSub").textContent = labels.stat[1];
+    $("#morphPanelTitle").textContent = labels.morph[0];
+    $("#morphPanelSub").textContent = labels.morph[1];
   }
   pause() {
     if (!state.playing) return;
@@ -842,9 +898,9 @@ class App {
     const el = $("#networkRule");
     if (!el) return;
     const labels = {
-      fixed: "rule: d <= fixed radius",
-      varying: "rule: d <= local radius",
-      nearest: "rule: k nearest neighbors",
+      fixed: "固定半径",
+      varying: "局部半径",
+      nearest: "近邻连接",
     };
     el.textContent = labels[model] || labels.fixed;
   }
@@ -863,7 +919,7 @@ class App {
     $("#probeHint").classList.toggle("hidden", !on);
     if (on) {
       this.renderer.enablePicking((line) => this._onProbe(line));
-      this._setPage("brush");
+      this._setPage("params");
       this._setTab("probe");
     } else {
       this.renderer.disablePicking();
@@ -888,7 +944,7 @@ class App {
   _enterCinematicHome() {
     state.story.running = false;
     this.pause();
-    this._setPage("render");
+    this._setPage("showcase");
     this._clearBrush();
     this._setMode(0);
     state.tf.densityScale = 1.05;
@@ -1045,10 +1101,10 @@ class App {
     this.storyTweenLastStep = -1;
     this.renderer.setSteps(Math.min(state.tf.steps, exportMode ? 80 : this.cinematicSteps));
     this.renderer.setControlsEnabled(false);
-    this._setPage("render");
+    this._setPage("showcase");
     $("#app").classList.add("story-mode");
     $("#app").classList.remove("cinema-home");
-    $("#btnStory").textContent = "\u25a0 \u505c\u6b62";
+    $("#btnStory").textContent = "停止";
     $("#cinematicOverlay").classList.remove("hidden", "home", "complete");
     $("#cinematicOverlay").classList.add("running");
     $("#storyCaption").classList.remove("hidden");
@@ -1121,7 +1177,7 @@ class App {
     this._applyStoryLook({ mode: 0, density: 1.08, atlas: true, atlasOpacity: 0.66, topology: true });
     $("#cinematicOverlay").classList.remove("running", "look-fade", "chapter-changing");
     $("#cinematicOverlay").classList.add("complete");
-    $("#btnStory").textContent = "↻ 重看";
+    $("#btnStory").textContent = "重看";
     this.renderer.setControlsEnabled(true);
     this._setCinematicChapter(
       "COMPLETE / COSMIC WEB",
@@ -1139,7 +1195,7 @@ class App {
     $("#cinematicOverlay").classList.add("hidden");
     $("#cinematicOverlay").classList.remove("home", "running", "complete", "look-fade", "chapter-changing");
     $("#storyCaption").classList.add("hidden");
-    $("#btnStory").textContent = "\u751f\u6210\u77ed\u7247";
+    $("#btnStory").textContent = "短片";
     this.renderer.setControlsEnabled(true);
     this.renderer.setSteps(state.tf.steps);
     if (restoreRenderState && this.storySavedRender) {
@@ -1161,7 +1217,7 @@ class App {
       this.renderer.setCameraPose(this.storyCameraPose.position, this.storyCameraPose.target);
       this.storyCameraPose = null;
     }
-    const nextPage = page || (restorePage ? this.pageBeforeStory : "render");
+    const nextPage = page || (restorePage ? this.pageBeforeStory : "explore");
     this.pageBeforeStory = null;
     if (nextPage) this._setPage(nextPage);
   }
@@ -1234,7 +1290,7 @@ class App {
     return {
       bins,
       avg: total ? weighted / total : 0,
-      label: mode === "fixed" ? "Fixed Component" : mode === "varying" ? "Variable Component" : "Weak Component",
+      label: mode === "fixed" ? "定长连接" : mode === "varying" ? "自适应连接" : "近邻连接",
     };
   }
 
