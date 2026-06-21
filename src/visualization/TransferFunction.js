@@ -45,16 +45,16 @@ function stopPosition(q, key) {
 
 function colorStops(q, theme) {
   const stops = theme?.tfStops || [
-    ["0", "#f2f6f7"], ["25", "#dcebed"], ["50", "#b7dad9"], ["75", "#74bbb7"],
-    ["90", "#0d8c8a"], ["95", "#38e1d6"], ["99", "#ffcc66"], ["1", "#fffaf0"],
+    ["0", "#000000"], ["25", "#020202"], ["50", "#090909"], ["75", "#1f1f1f"],
+    ["90", "#6e737a"], ["95", "#aeb4ba"], ["99", "#e7ebef"], ["1", "#ffffff"],
   ];
   return stops.map(([p, color]) => ({ p: stopPosition(q, p), c: hexRGB(color) }));
 }
 
 function alphaStops(q) {
   return [
-    { p: 0.0, a: 0.0 }, { p: q.q25, a: 0.0 }, { p: q.q50, a: 0.0025 }, { p: q.q75, a: 0.015 },
-    { p: q.q90, a: 0.050 }, { p: q.q95, a: 0.135 }, { p: q.q99, a: 0.35 }, { p: 1.0, a: 0.62 },
+    { p: 0.0, a: 0.0 }, { p: q.q25, a: 0.0 }, { p: q.q50, a: 0.0 }, { p: q.q75, a: 0.020 },
+    { p: q.q90, a: 0.110 }, { p: q.q95, a: 0.285 }, { p: q.q99, a: 0.62 }, { p: 1.0, a: 0.88 },
   ];
 }
 

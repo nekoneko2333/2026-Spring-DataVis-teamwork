@@ -3,7 +3,7 @@
 import {
   Scene, PerspectiveCamera, WebGLRenderer, BoxGeometry, Mesh, ShaderMaterial,
   GLSL3, Vector3, Vector2, BackSide, DoubleSide, LineSegments, EdgesGeometry,
-  LineBasicMaterial, BufferGeometry, Line, AdditiveBlending,
+  LineBasicMaterial, BufferGeometry, Line, AdditiveBlending, Points, PointsMaterial,
   Data3DTexture, RedFormat, RGBFormat, FloatType, NearestFilter, UnsignedByteType,
   MeshBasicMaterial, MeshStandardMaterial, AmbientLight, DirectionalLight, BufferAttribute, Float32BufferAttribute,
 } from "three";
@@ -33,6 +33,7 @@ export class VolumeRenderer {
     this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, premultipliedAlpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.35));
     this.renderer.setClearColor(0x000000, 0);
+    this.networkVisible = true;
     // R32F 线性插值
     this.renderer.getContext().getExtension("OES_texture_float_linear");
 
@@ -103,7 +104,13 @@ export class VolumeRenderer {
 
     this.cubeInterior = new Mesh(
       new BoxGeometry(1.001, 1.001, 1.001),
-      new MeshBasicMaterial({ color: 0xf2f4f8, side: BackSide })
+      new MeshBasicMaterial({
+        color: 0x01030a,
+        side: BackSide,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false,
+      })
     );
     this.scene.add(this.cubeInterior);
 
@@ -113,17 +120,40 @@ export class VolumeRenderer {
     // 包围盒线框(定向参考)
     this.edges = new LineSegments(
       new EdgesGeometry(new BoxGeometry(1, 1, 1)),
-      new LineBasicMaterial({ color: 0x2a496f, transparent: true, opacity: 0.5 })
+      new LineBasicMaterial({ color: 0xd7f4ff, transparent: true, opacity: 0.18, blending: AdditiveBlending })
     );
     this.scene.add(this.edges);
 
+    this.networkLineMaterial = new LineBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.32,
+      depthWrite: false,
+      blending: AdditiveBlending,
+    });
+    this.networkPointMaterial = new PointsMaterial({
+      color: 0xffffff,
+      size: 0.008,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+      blending: AdditiveBlending,
+    });
+    this.networkLines = new LineSegments(new BufferGeometry(), this.networkLineMaterial);
+    this.networkPoints = new Points(new BufferGeometry(), this.networkPointMaterial);
+    this.networkLines.renderOrder = 5;
+    this.networkPoints.renderOrder = 6;
+    this.scene.add(this.networkLines);
+    this.scene.add(this.networkPoints);
+
     // MC 真实网格(光照渲染)
     this.scene.add(new AmbientLight(0x4a6a9a, 0.9));
-    this.keyLight = new DirectionalLight(0xe9ecff, 1.5); this.keyLight.position.set(1, 1.2, 0.8); this.scene.add(this.keyLight);
-    this.rimLight = new DirectionalLight(0x7d8cff, 0.7); this.rimLight.position.set(-1, -0.5, -0.8); this.scene.add(this.rimLight);
+    this.keyLight = new DirectionalLight(0xf8fbff, 1.35); this.keyLight.position.set(1, 1.2, 0.8); this.scene.add(this.keyLight);
+    this.rimLight = new DirectionalLight(0xbfefff, 0.85); this.rimLight.position.set(-1, -0.5, -0.8); this.scene.add(this.rimLight);
     this.mcMaterial = new MeshStandardMaterial({
-      color: 0xffcc66, metalness: 0.28, roughness: 0.48, side: DoubleSide,
-      emissive: 0x3a2a08, flatShading: false,
+      color: 0xeef8ff, metalness: 0.18, roughness: 0.42, side: DoubleSide,
+      emissive: 0x172a38, flatShading: false,
     });
     this.mcMesh = new Mesh(new BufferGeometry(), this.mcMaterial);
     this.mcMesh.visible = false;
@@ -173,8 +203,10 @@ export class VolumeRenderer {
   setTheme(theme) {
     this.theme = theme;
     const v = theme.volume;
-    this.cubeInterior.material.color.set(v.cubeInterior || "#f2f4f8");
+    this.cubeInterior.material.color.set(v.cubeInterior || "#01030a");
+    if (v.cubeOpacity != null) this.cubeInterior.material.opacity = v.cubeOpacity;
     this.edges.material.color.set(v.edge);
+    if (v.edgeOpacity != null) this.edges.material.opacity = v.edgeOpacity;
     this.keyLight.color.set(v.key);
     this.rimLight.color.set(v.rim);
     this.mcMaterial.color.set(v.mesh);
@@ -202,6 +234,29 @@ export class VolumeRenderer {
     this.uniforms.uAtlasActive.value = active;
     if (opacity != null) this.uniforms.uAtlasOpacity.value = opacity;
     if (classOn) this.uniforms.uClassOn.value.set(classOn.sheet ? 1 : 0, classOn.filament ? 1 : 0, classOn.node ? 1 : 0);
+  }
+
+  setNetworkGeometry(network, { opacity = 0.34, pointOpacity = 0.92 } = {}) {
+    const oldLines = this.networkLines.geometry;
+    const oldPoints = this.networkPoints.geometry;
+    const lineGeometry = new BufferGeometry();
+    const pointGeometry = new BufferGeometry();
+    if (network?.lines?.length) lineGeometry.setAttribute("position", new Float32BufferAttribute(network.lines, 3));
+    if (network?.points?.length) pointGeometry.setAttribute("position", new Float32BufferAttribute(network.points, 3));
+    this.networkLines.geometry = lineGeometry;
+    this.networkPoints.geometry = pointGeometry;
+    oldLines?.dispose();
+    oldPoints?.dispose();
+    this.networkLineMaterial.opacity = opacity;
+    this.networkPointMaterial.opacity = pointOpacity;
+    this.networkLines.visible = this.networkVisible && !!network?.lineCount;
+    this.networkPoints.visible = this.networkVisible && !!network?.pointCount;
+  }
+
+  setNetworkVisible(visible) {
+    this.networkVisible = visible;
+    this.networkLines.visible = visible && (this.networkLines.geometry.getAttribute("position")?.count || 0) > 0;
+    this.networkPoints.visible = visible && (this.networkPoints.geometry.getAttribute("position")?.count || 0) > 0;
   }
 
   // MC 真实三角网格模式

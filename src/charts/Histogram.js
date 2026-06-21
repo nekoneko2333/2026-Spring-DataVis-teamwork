@@ -72,11 +72,15 @@ export class Histogram {
   }
 
   _barColor(i) {
-    if (!this.tf) return "#38e1d6";
+    if (!this.tf) return "#7f8790";
     const x = this.centersNorm[i];
     const j = Math.min(255, Math.max(0, Math.round(x * 255)));
     const d = this.tf.data;
-    return `rgb(${d[j*4]},${d[j*4+1]},${d[j*4+2]})`;
+    const floor = 58;
+    const r = Math.max(floor, d[j * 4]);
+    const g = Math.max(floor, d[j * 4 + 1]);
+    const b = Math.max(floor, d[j * 4 + 2]);
+    return `rgb(${r},${g},${b})`;
   }
   _recolor() {
     this.gBars.selectAll("rect").attr("fill", (d, i) => this._barColor(i));
