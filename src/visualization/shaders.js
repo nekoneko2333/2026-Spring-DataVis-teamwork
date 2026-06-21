@@ -33,6 +33,7 @@ uniform float uLoClip;        // void 闃堝€?
 uniform bool  uBrushActive;
 uniform float uBrushMin;
 uniform float uBrushMax;
+uniform float uBrushBoost;
 uniform float uGradScale;
 uniform vec3  uLightDir;
 uniform float uTime;
@@ -234,7 +235,8 @@ void main() {
     }
 
     float stepLen = min(adaptiveStep(dt, src.a, grad, rd), tEnd - t);
-    float sampleOpacity = clamp(src.a * uDensityScale, 0.0, 1.0);
+    float brushBoost = (uBrushActive && gate > 0.0) ? uBrushBoost : 1.0;
+    float sampleOpacity = clamp(src.a * uDensityScale * brushBoost, 0.0, 1.0);
     float shadow = 1.0;
     if (gate > 0.0 && sampleOpacity > 0.03 && max(diff, spec * src.a) > 0.02) {
       shadow = shadowTransmittance(pos, stepLen, L);
@@ -254,6 +256,7 @@ void main() {
 
     float a = 1.0 - pow(1.0 - sampleOpacity, stepLen * 256.0);
     a *= gate;
+    lit *= mix(1.0, 1.28, clamp(brushBoost - 1.0, 0.0, 1.0));
     col += (1.0 - alpha) * a * lit;
     alpha += (1.0 - alpha) * a;
     t += stepLen;

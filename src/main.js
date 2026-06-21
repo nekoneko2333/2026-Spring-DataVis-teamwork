@@ -23,8 +23,9 @@ class App {
     this.labelTimer = null;
     this.playTimer = null;
     this.lastStepTime = 0;
-    this.stepInterval = 78; // ms, ≈13 步/s 播放
-    this.playbackSteps = 88; // 播放时降低 ray-march 步进数(弱机更流畅)
+    this.stepInterval = 160; // ms，探索播放按关键帧推进，避免相邻 step 变化太弱
+    this.playbackStride = 3; // 每帧跨 3 个数据步，接近手动拖动时的可见变化
+    this.playbackSteps = 128; // 播放时保留足够 ray-march 步进，避免体渲染发糊
     this.cinematicSteps = 96;
     this.storyTweenLastStep = -1;
     this.chapterFxTimer = null;
@@ -593,7 +594,7 @@ class App {
       if (state.brush.active) this._updateSelStats(step);
       if (this.histogram.tf) { /* recolored on tf change */ }
     }
-    if (!fromPlayback) this._updateNetworkLayer(step);
+    if (!fromPlayback || this.networkVisible) this._updateNetworkLayer(step);
 
     const cached = fromPlayback ? this.dm.getCachedVolumeSet(step) : null;
     if (cached) {
@@ -611,7 +612,7 @@ class App {
     }
 
     // 预取
-    if (!fromPlayback) this.dm.prefetch(step, this._dir || 1, 2);
+    this.dm.prefetch(step, this._dir || 1, fromPlayback ? 4 : 2);
 
     if (state.renderMode === 5) this._scheduleMesh(step);
     if (!fromPlayback) {
@@ -680,9 +681,12 @@ class App {
   togglePlay() { state.playing ? this.pause() : this.play(); }
   play() {
     if (state.playing) return;
+    const last = state.meta.timeSteps - 1;
+    if (state.step >= last) this.setStep(0);
     state.playing = true;
     $("#btnPlay").textContent = "❚❚";
     this.renderer.setSteps(Math.min(state.tf.steps, this.playbackSteps));
+    this.dm.prefetch(state.step, 1, Math.max(8, this.playbackStride * 4));
     clearInterval(this.playTimer);
     this.playTimer = setInterval(() => this._tick(), this.stepInterval);
   }
@@ -700,8 +704,14 @@ class App {
   _tick() {
     if (!state.playing) return;
     this._dir = 1;
-    const next = (state.step + 1) % state.meta.timeSteps;
+    const last = state.meta.timeSteps - 1;
+    if (state.step >= last) {
+      this.pause();
+      return;
+    }
+    const next = Math.min(last, state.step + this.playbackStride);
     this.applyStep(next, { fromPlayback: true });
+    if (next >= last) this.pause();
   }
 
   // ---------------- mode / brush ----------------
@@ -910,14 +920,14 @@ class App {
     this.renderer.setCameraPose(mix(from.position, to.position, t), mix(from.target, to.target, t));
   }
 
-  _applyStoryLook({ mode = 0, density = 0.8, brush = null, atlas = false, atlasOpacity = 0.55, topology = false } = {}) {
+  _applyStoryLook({ mode = 0, density = 0.8, brush = null, atlas = false, atlasOpacity = 0.55, topology = false, brushBoost = 1 } = {}) {
     this._setMode(mode);
     state.tf.densityScale = density;
     this.renderer.setDensityScale(density);
     this._setTopologyVisible(topology, { updateButton: false });
     if (brush) {
       const ranges = {
-        sheet: [this.percent("25"), this.percent("75")],
+        sheet: [this.percent("25"), this.percent("90")],
         filament: [this.percent("75"), this.percent("95")],
         node: [this.percent("95"), 1],
         top1: [this.percent("99"), 1],
@@ -925,7 +935,7 @@ class App {
       };
       const [mn, mx] = ranges[brush];
       state.brush = { active: true, min: mn, max: mx, label: brush };
-      this.renderer.setBrush(true, mn, mx);
+      this.renderer.setBrush(true, mn, mx, brushBoost);
       this.histogram.setRangeNorm(mn, mx);
     } else {
       this._clearBrush();
@@ -1019,14 +1029,14 @@ class App {
     const chapters = [
       {
         from: 0, to: 14, duration: 4200, shot0: shots.far, shot1: shots.drift,
-        look: { mode: 0, density: 0.86, topology: false },
+        look: { mode: 0, density: 0.86, topology: true },
         kicker: "STAGE 01 / INITIAL FLUCTUATIONS",
         title: "初始微扰",
         text: "宇宙早期的密度场接近均匀，只存在很弱的涨落。后面的网状结构并不是突然出现，而是从这些微小差异被引力逐渐放大开始。",
       },
       {
         from: 14, to: 38, duration: 5000, shot0: shots.drift, shot1: shots.thread,
-        look: { mode: 0, density: 1.16, brush: "sheet", topology: false },
+        look: { mode: 0, density: 1.30, brush: "sheet", brushBoost: 5.5, topology: true },
         kicker: "STAGE 02 / SHEETS",
         title: "片层坍缩",
         text: "随着涨落增长，物质先在较大的面状区域聚集，形成墙和片层。它们像宇宙网的薄膜边界，随后会被更细的丝状结构连接起来。",

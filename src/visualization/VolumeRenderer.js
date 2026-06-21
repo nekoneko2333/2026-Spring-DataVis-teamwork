@@ -75,6 +75,7 @@ export class VolumeRenderer {
       uBrushActive: { value: false },
       uBrushMin: { value: 0 },
       uBrushMax: { value: 1 },
+      uBrushBoost: { value: 1 },
       uGradScale: { value: 1.0 },
       uLightDir: { value: new Vector3(0.6, 0.8, 0.5).normalize() },
       uTime: { value: 0 },
@@ -225,10 +226,11 @@ export class VolumeRenderer {
   setIso(v) { this.uniforms.uIso.value = v; }
   setHiClip(v) { this.uniforms.uHiClip.value = v; }
   setLoClip(v) { this.uniforms.uLoClip.value = v; }
-  setBrush(active, min, max) {
+  setBrush(active, min, max, boost = 1) {
     this.uniforms.uBrushActive.value = active;
     this.uniforms.uBrushMin.value = min;
     this.uniforms.uBrushMax.value = max;
+    this.uniforms.uBrushBoost.value = active ? boost : 1;
   }
   setAtlas(active, opacity, classOn) {
     this.uniforms.uAtlasActive.value = active;
