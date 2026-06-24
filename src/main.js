@@ -1020,7 +1020,9 @@ class App {
     this._setTopologyVisible(topology, { updateButton: false });
     if (brush) {
       const ranges = {
-        sheet: [this.percent("25"), this.percent("90")],
+        // 片层: 取中高密度段 (q50~q95)。灰阶下 q50 以下近黑, 在黑底短片里不可见;
+        // 上抬到有灰度亮度的区间, 墙/片层才看得见, 同时排除最亮的节点 (>q95)。
+        sheet: [this.percent("50"), this.percent("95")],
         filament: [this.percent("75"), this.percent("95")],
         node: [this.percent("95"), 1],
         top1: [this.percent("99"), 1],
@@ -1129,7 +1131,7 @@ class App {
       },
       {
         from: 14, to: 38, duration: 5000, shot0: shots.drift, shot1: shots.thread,
-        look: { mode: 0, density: 1.30, brush: "sheet", brushBoost: 5.5, topology: true },
+        look: { mode: 0, density: 1.18, brush: "sheet", brushBoost: 2.8, topology: true },
         kicker: "STAGE 02 / SHEETS",
         title: "片层坍缩",
         text: "随着涨落增长，物质先在较大的面状区域聚集，形成墙和片层。它们像宇宙网的薄膜边界，随后会被更细的丝状结构连接起来。",
