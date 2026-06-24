@@ -1,0 +1,413 @@
+# 621 MCF README
+
+更新日期：2026-06-21
+
+## 当前结论
+
+本轮先 debug 了两个遗留问题：
+
+1. 首页实时短片里的“片层坍缩”基本看不到。
+2. 进入首页/探索后时间控制播放不了。
+
+当前处理结果：
+
+- “片层坍缩”已修复到可见状态。
+- “进入数据探索后时间控制播放不了”在当前版本未复现；已验证进入探索后可以播放，step 会推进。
+- 首页封面状态下时间控制本来是隐藏的，只有点“进入数据探索”后才应使用普通时间控制。
+
+随后用户澄清：问题不是播放按钮完全失效，而是“数据探索内播放时，随着时间步变化不明显，像缺帧或渲染问题；拓扑不应该静止不变，而应该随着时间一起变化”。
+
+针对澄清后的问题，当前已处理：
+
+- 撤销了“播放时隐藏拓扑”的错误处理。
+- 探索页拓扑保持默认显示。
+- 自动播放每个时间步都会同步更新拓扑网络，不再只推进 slider 和体渲染纹理。
+- 自动播放时持续预取后续全分辨率体数据，减少长期停留在低清 preview 路径的问题。
+- 探索播放改成关键帧推进：约 `160ms` 一帧，每帧跨 `3` 个数据 step，接近手动拖条时的可见变化。
+- 探索播放到 `99` 后停止，不再从 `99 -> 0` 循环跳变。
+- 播放期间 ray-march 步进数从 `88` 提高到 `128`，减少播放时体渲染发糊、低分辨率感过强的问题。
+- 首页短片仍覆盖 `0 -> 99` 全时间，但分为 5 个章节；现在所有章节都启用拓扑，让拓扑从初始微扰阶段就随时间演化。
+
+## 本轮新增修复
+
+### 1. 片层坍缩可见性
+
+问题原因：
+
+- sheet 阶段原本刷选 `25% - 75%` 密度区间。
+- 当前黑白 transfer function 在这个中密度区间 alpha 很低，尤其 `q25/q50` 基本透明，`q75` 也只有很弱 alpha。
+- 所以即使 story 切到 sheet brush，实时体渲染里片层几乎不可见。
+
+修复方式：
+
+- 在 `src/visualization/shaders.js` 增加 `uBrushBoost` uniform。
+- 在 brush 生效时，用 `uBrushBoost` 提高刷选区域的 opacity，并轻微提高亮度。
+- 在 `src/visualization/VolumeRenderer.js` 的 `setBrush(active, min, max, boost = 1)` 支持可选 boost。
+- 在 `src/main.js` 的 story sheet 阶段单独设置：
+  - `density: 1.30`
+  - `brush: "sheet"`
+  - `brushBoost: 5.5`
+  - sheet 范围从 `25% - 75%` 扩到 `25% - 90%`
+
+注意：
+
+- 普通交互 brush 仍默认 `boost = 1`，不会整体改变用户探索时的刷选行为。
+- 体渲染仍保持黑白灰，不引入强彩色。
+
+验证证据：
+
+- 浏览器运行到 `STAGE 02 / SHEETS` 后读取 uniform：
+  - `density = 1.3`
+  - `brushActive = true`
+  - `brushBoost = 5.5`
+  - `controls = false`
+- 截图视觉确认片层结构明显可见。
+- 截图中心区域亮度统计：
+  - mean 约 `33.15`
+  - p90 约 `66`
+  - `亮度 > 35` 的像素约 `31.7%`
+  - `亮度 > 55` 的像素约 `14.5%`
+
+### 2. 时间控制播放
+
+复现/验证方式：
+
+- 打开 `http://127.0.0.1:5173/`
+- 点击首页“进入数据探索”
+- 点击左侧时间控制播放按钮
+
+当前验证结果：
+
+- 点击前：
+  - step = `0`
+  - play button = `▶`
+  - button visible = `true`
+  - controls = `true`
+- 点击后约 750ms：
+  - step = `9`
+  - play button = `❚❚`
+  - playTimer = `true`
+  - loadState = `○ 预览(播放)`
+  - controls = `true`
+
+结论：
+
+- 当前版本里，进入数据探索后普通时间播放是可用的。
+- 如果用户说的是“首页封面状态下”的时间控制，那时普通时间控制被 story-mode 隐藏，是设计行为，不是播放按钮失效。
+
+### 3. 探索播放变化不明显 / 拓扑未随时间变化
+
+问题原因：
+
+- 手动拖时间条会调用 `setStep()`，再进入 `applyStep(step, { fromPlayback: false })`。
+- 这个路径会执行 `_updateNetworkLayer(step)`，也会触发当前 step 的全分辨率加载。
+- 自动播放会调用 `applyStep(step, { fromPlayback: true })`。
+- 旧逻辑里 `fromPlayback = true` 时跳过 `_updateNetworkLayer(step)`，因此拓扑几何会停留在旧 step，看起来“不合理地一直存在/不变”。
+- 自动播放旧逻辑也只在手动路径里做预取，导致播放中更容易长期使用低清 preview 体纹理。
+- 探索播放参数原本偏向流畅：`stepInterval = 78ms`、`playbackSteps = 88`。这会让时间推进偏快，同时体渲染采样偏粗，用户更容易感觉变化不明显。
+
+修复方式：
+
+- `src/main.js`
+  - 撤销 `topologyBeforePlayback` 和播放时隐藏拓扑的逻辑。
+  - `applyStep()` 中从 `if (!fromPlayback) this._updateNetworkLayer(step)` 改为：
+    - 非播放路径照常更新拓扑；
+    - 播放路径只要 `networkVisible = true`，也更新拓扑。
+  - `prefetch()` 从只在非播放路径触发，改为播放路径也触发。
+  - `play()` 开始时先预取后续 8 帧全分辨率体数据。
+  - `stepInterval` 从 `78` 改为 `160`。
+  - 新增 `playbackStride = 3`，探索播放每帧跨 3 个数据 step。
+  - `_tick()` 从循环播放改成到最后一步 `99` 自动暂停。
+  - `playbackSteps` 从 `88` 改为 `128`。
+  - 短片章节 `STAGE 01` 和 `STAGE 02` 的 `topology` 从 `false` 改为 `true`。
+
+验证状态：
+
+- `npm run build` 已通过。
+- 由于当前环境缺少可调用的 Playwright 浏览器二进制，且 in-app browser 控制接口这次连接失败，未完成自动截图像素差分验证。
+- 需要在浏览器中人工复核：
+  - 进入数据探索后，拓扑按钮应保持 active。
+  - 中间体渲染上应默认显示拓扑线/点。
+  - 点击播放时，时间步应按 `+3` 推进，到 `99` 后停止。
+  - 播放期间拓扑形态应跟着 step 变化。
+  - 手动拖动和自动播放在同一时间步附近看到的拓扑/体渲染差异应接近。
+  - 首页短片从 `STAGE 01` 开始就应有拓扑，并随时间变化。
+
+### 4. 展示性优化：体渲染预设、拓扑编码、界面减噪
+
+本轮按用户确认的方向继续做了 3/4/5 三类优化。
+
+体渲染预设：
+
+- 在 `index.html` 的传递函数区域新增 `renderPresets`：
+  - `结构`
+  - `演化`
+  - `高密度`
+  - `空洞`
+- 在 `src/visualization/TransferFunction.js` 增加 `setAlphaProfile(profile)`。
+- 新增 4 套 alpha profile：
+  - `structure`：原推荐黑白结构风格。
+  - `evolution`：提高中低密度 alpha，让播放时体渲染变化更容易被看见。
+  - `dense`：压低中密度，只强调高密度节点/丝。
+  - `void`：反向显示低密度区域，用于空洞观察。
+- 在 `src/main.js` 增加 `_applyRenderPreset(name)`：
+  - 同步 render mode。
+  - 同步 densityScale / steps / isoValue。
+  - 同步 transfer function。
+  - 同步 UI slider 和 TF editor。
+
+拓扑视觉编码：
+
+- 在 `src/data/DataManager.js` 的 `buildNetwork()` 中为拓扑生成：
+  - `pointColors`：节点亮度随节点密度变化。
+  - `lineColors`：边亮度随连接强度变化，连接越强越亮，长弱连接更暗。
+- 在 `src/visualization/VolumeRenderer.js` 中开启拓扑 `vertexColors`。
+- 降低拓扑整体 opacity，避免白色网络压过黑白体渲染。
+- 当前含义：
+  - 节点更亮 = 局部密度更高。
+  - 边更亮 = 两端密度更高且连接更紧。
+
+界面减噪：
+
+- 渲染页隐藏顶部 dataset strip、品牌副标题和视口 badges。
+- 渲染页侧栏默认稍微降透明度，hover/focus 时恢复。
+- 渲染页 panel 的英文副标题弱化。
+- 预设按钮采用白字 + 细线，不使用方框按钮，保持克制风格。
+
+验证状态：
+
+- `npm run build` 已通过。
+- 需要人工浏览器复核：
+  - 传递函数区域是否出现 4 个预设。
+  - `演化` 预设下播放体渲染变化是否比 `结构` 更明显。
+  - `高密度` 是否突出节点/高密度结构。
+  - `空洞` 是否能看出低密度区域。
+  - 拓扑是否更克制，且节点/边有亮度层次。
+  - 渲染页是否比之前更干净。
+
+### 5. 网页结构重排：展示 / 探索 / 参数 / 图表
+
+本轮按“不要继续堆小控件，而是重新做网页风格和功能分区”的方向做了信息架构调整。
+
+页面分区：
+
+- 顶部导航从旧的：
+  - `体渲染`
+  - `统计演化`
+  - `刷选联动`
+  - `形态结构`
+- 改成新的：
+  - `展示`
+  - `探索`
+  - `参数`
+  - `图表`
+
+具体行为：
+
+- `展示`
+  - 作为首页/叙事层。
+  - 复用现有实时短片首页。
+  - 隐藏顶部导航、左右侧栏和底部图表，让主画面全屏。
+  - 阶段词条改成右侧竖排展示。
+  - 底部保留一条极简进度线。
+
+- `探索`
+  - 作为工作台/浏览层。
+  - 中央保留体渲染主画面。
+  - 左侧保留时间控制、阶段跳转和渲染预设。
+  - 右侧保留统计摘要、宇宙网形态、拓扑模型。
+  - 默认隐藏底部复杂图表、选区统计、传递函数编辑曲线和高级 Atlas 开关。
+
+- `参数`
+  - 作为高级参数/调试层。
+  - 显示传递函数、密度增益、步进精度、等值面阈值、Atlas、Probe 等高级控件。
+  - Probe 按钮现在会跳到 `参数` 页，而不是旧的刷选页。
+
+- `图表`
+  - 作为数据图表层。
+  - 隐藏 3D 视口和左右工具栏。
+  - 底部图表区变成主内容区，集中查看直方图、指纹图、统计曲线、功率谱、探针剖面。
+
+新增阶段跳转：
+
+- 在时间控制下新增 `stageJumps`：
+  - `初始`
+  - `片层`
+  - `丝状`
+  - `节点`
+  - `空洞`
+- 点击阶段会暂停播放并跳到对应时间步。
+- 当前阶段会随 `timeSlider`、播放和手动拖动自动高亮。
+
+兼容处理：
+
+- `src/main.js` 的 `_setPage()` 现在支持新页面名。
+- 旧页面名仍做兼容映射：
+  - `render -> explore`
+  - `stats -> charts`
+  - `brush -> params`
+  - `web -> explore`
+- 短片首页的“进入探索”现在进入 `explore`。
+- 短片结束/退出后的默认页从旧 `render` 改为 `explore`。
+
+验证状态：
+
+- `npm run build` 已通过。
+- 追加收口：
+  - 修正 `参数` 页中 `#center` 的布局，不再强行设为 flex，避免 3D 视口撑开异常。
+  - `图表` 页让 bottom chart area 成为完整主内容区。
+  - `探索` 页进一步隐藏高级参数标题/Atlas 开关，降低控制台感。
+  - `探索` 页统计摘要改成更轻的 2 列显示。
+  - 源码搜索确认旧 `data-page="render/stats/brush/web"` 入口不再存在；旧名只保留 `_setPage()` 兼容映射。
+- 需要人工浏览器复核：
+  - 首屏是否是全屏展示页。
+  - 点击“进入数据探索”是否进入 `探索` 页。
+  - 顶部导航四个页面是否分别切换到正确分区。
+  - `探索` 页是否比之前更少噪声。
+  - `参数` 页是否还能调传递函数/Atlas/Probe。
+  - `图表` 页是否集中显示底部图表。
+
+### 6. 探索页极简化、字体和亮度修正
+
+本轮根据用户反馈继续处理：
+
+- 多处中文标题上半部分被上一栏遮盖。
+- 探索页“传递函数”下面只剩 4 个预设按钮，标题语义不对。
+- 探索页字太多，控制台感仍然偏强。
+- 整体画面太黑，体渲染和黑底层次不够。
+- 英文字体/中英混排不够高级。
+
+处理内容：
+
+- 探索页标题压缩：
+  - `时间控制` 在探索页显示为 `时间`。
+  - `传递函数` 在探索页显示为 `视图`。
+  - `当前统计` 在探索页显示为 `状态`。
+  - `宇宙网形态` 在探索页显示为 `拓扑`。
+  - 参数页仍恢复完整标题：`传递函数 / Transfer function` 等。
+
+- 探索页进一步少字：
+  - 隐藏时间轴小图和 legend。
+  - 隐藏“螺旋”按钮。
+  - 隐藏顶部 mode tabs。
+  - 隐藏 `导出 / Probe / Atlas`，探索页只保留 `短片 / 拓扑`。
+  - 右侧统计只保留 `max ρ` 和 `Gini` 两个核心数值。
+  - 拓扑模型改成中文短词：`定长 / 自适应 / 近邻`。
+  - 拓扑解释压成两行：`亮节点 = 高密度`、`亮边 = 强连接`。
+
+- 字体和裁切：
+  - 全局字体栈改为更干净的 `Helvetica Neue / Inter / Geist / Noto Sans SC / Source Han Sans SC / Microsoft YaHei`。
+  - 修正 panel header 的 `line-height`、`padding`、`overflow`。
+  - 去掉标题 uppercase 和过大的 letter-spacing。
+  - 侧栏 panel 不再裁切标题，避免中文上半部分被遮盖。
+
+- 亮度和黑场：
+  - 页面背景从纯黑改成深灰黑和轻微径向亮度。
+  - 视口背景加入低强度灰阶光场，不再是死黑。
+  - 体渲染 canvas 在展示/探索页提高 brightness，并保留黑白灰风格。
+  - `structure` 和 `evolution` transfer function 的中低密度 alpha 小幅提高，避免前中期结构完全看不见。
+
+验证状态：
+
+- `npm run build` 已通过。
+- 需要人工浏览器复核：
+  - 探索页标题是否不再被裁切。
+  - 探索页左侧是否只剩时间、阶段、视图预设。
+  - `视图` 下 4 个按钮是否语义清楚。
+  - 背景是否比纯黑更有层次。
+  - `演化` 预设下体渲染变化是否更明显。
+  - 英文/中文混排是否比之前更干净。
+
+## 已确认的其他状态
+
+- 固定 MP4/WebM 短片方案已取消。
+- 源码和 dist 里已无：
+  - `STORY_VIDEO`
+  - `cinemaVideo`
+  - `video-playing`
+  - `cosmic-web-story`
+  - `.mp4`
+  - `.webm`
+- `public/videos` 和 `dist/videos` 已清空/不存在。
+- 当前服务为：
+  - `http://127.0.0.1:5173/`
+  - 监听进程：单个 5173 listener。
+- `npm run build` 已通过。
+
+## 当前重要文件
+
+- `src/main.js`
+  - 首页实时 story 流程、sheet 阶段参数、时间播放控制、story/explore 切换。
+
+- `src/visualization/shaders.js`
+  - 新增 brush boost 在体渲染 shader 中提升刷选区域可见性。
+
+- `src/visualization/VolumeRenderer.js`
+  - `setBrush()` 增加可选 boost 参数。
+
+- `src/styles.css`
+  - 首页黑白灰视觉、按钮克制样式、图表样式覆盖。
+
+- `src/themes.js`
+  - 体渲染灰阶主题；二维图保留低饱和指标色。
+
+## 后续如仍有反馈，优先检查
+
+1. 如果用户仍说“探索播放变化不明显”
+   - 检查 `window.__app.stepInterval` 是否为 `160`。
+   - 检查 `window.__app.playbackStride` 是否为 `3`。
+   - 检查 `window.__app.playbackSteps` 是否为 `128`。
+   - 检查播放时 `window.__app.renderer.uniforms.uSteps.value` 是否约为 `128`。
+   - 检查播放时 `window.__app.currentNetwork.step` 是否随 `#timeSlider.value` 一起变化。
+   - 检查播放到 `99` 后是否暂停，避免 `99 -> 0` 的首尾跳变被误解为最后几步突变。
+   - 对比 step 0、20、40 的体渲染截图，判断是数据本身变化慢，还是 preview texture 没刷新。
+   - 如果仍不明显，下一步可考虑给播放添加轻微时间差分增强或关键帧插值，但要避免破坏真实数据含义。
+
+   额外检查预设：
+   - 点击 `演化` 预设，看中低密度结构是否比 `结构` 预设更可见。
+   - 如果 `演化` 仍不明显，可以继续小幅提高 `TransferFunction.js` 里 `evolution` profile 的 `q50/q75/q90` alpha。
+
+2. 如果用户仍说“中间拓扑不随时间变”
+   - 检查 `window.__app.networkVisible`。
+   - 检查 `window.__app.renderer.networkVisible`。
+   - 检查 `window.__app.renderer.networkLines.visible` 和 `networkPoints.visible`。
+   - 检查 `#btnTopology.classList.contains("active")`。
+   - 检查 `window.__app.currentNetwork.step` 是否等于当前 slider step。
+   - 检查 network geometry 是否带 `color` attribute，拓扑亮度层次来自 `pointColors/lineColors`。
+
+3. 如果用户仍说“时间控制播放不了”
+   - 先确认用户是否已经点了“进入数据探索”。
+   - 首页封面状态下普通时间控制不可见，这是当前设计。
+   - 若进入探索后仍不动，检查：
+     - `state.playing`
+     - `window.__app.playTimer`
+     - `#timeSlider.value`
+     - `#btnPlay.textContent`
+     - `#app.className`
+
+4. 如果用户说“页面分区还是乱”
+   - 优先检查当前 `#app.dataset.page`。
+   - 展示性内容应优先放 `showcase`。
+   - 常用浏览/播放放 `explore`。
+   - 高级参数放 `params`。
+   - 完整统计图放 `charts`。
+   - 不要再把新控件直接堆进 `explore` 默认视图。
+
+5. 如果用户仍说“字体被遮盖”
+   - 先检查 `.panel-head h2` 的 `line-height` 和 `padding` 是否被更后面的 CSS 覆盖。
+   - 检查侧栏 `.panel` 是否又出现 `overflow: hidden`。
+   - 探索页标题应通过 `_syncPageChrome("explore")` 压缩为短标题。
+
+6. 如果用户仍说“画面太黑”
+   - 优先微调 `src/visualization/TransferFunction.js` 里的 `structure/evolution` alpha profile。
+   - 其次调 `src/styles.css` 末尾的 `#viewport` 背景和 `#glcanvas` brightness。
+   - 不建议恢复强彩色体渲染；用户要求体渲染继续保持参考站式黑白灰。
+
+7. 如果用户仍说“片层坍缩看不到”
+   - 先确认浏览器刷新后加载的是当前 5173 服务。
+   - 检查 sheet stage uniform：
+     - `uBrushActive`
+     - `uBrushBoost`
+     - `uDensityScale`
+     - `uBrushMin/uBrushMax`
+   - 不建议恢复彩色体渲染；用户要求体渲染保持黑白参考风格。

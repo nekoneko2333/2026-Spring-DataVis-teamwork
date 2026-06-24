@@ -45,17 +45,32 @@ function stopPosition(q, key) {
 
 function colorStops(q, theme) {
   const stops = theme?.tfStops || [
-    ["0", "#f2f6f7"], ["25", "#dcebed"], ["50", "#b7dad9"], ["75", "#74bbb7"],
-    ["90", "#0d8c8a"], ["95", "#38e1d6"], ["99", "#ffcc66"], ["1", "#fffaf0"],
+    ["0", "#000000"], ["25", "#020202"], ["50", "#090909"], ["75", "#1f1f1f"],
+    ["90", "#6e737a"], ["95", "#aeb4ba"], ["99", "#e7ebef"], ["1", "#ffffff"],
   ];
   return stops.map(([p, color]) => ({ p: stopPosition(q, p), c: hexRGB(color) }));
 }
 
-function alphaStops(q) {
-  return [
-    { p: 0.0, a: 0.0 }, { p: q.q25, a: 0.0 }, { p: q.q50, a: 0.0025 }, { p: q.q75, a: 0.015 },
-    { p: q.q90, a: 0.050 }, { p: q.q95, a: 0.135 }, { p: q.q99, a: 0.35 }, { p: 1.0, a: 0.62 },
-  ];
+function alphaStops(q, profile = "structure") {
+  const profiles = {
+    structure: [
+      [0.0, 0.0], [q.q25, 0.0], [q.q50, 0.006], [q.q75, 0.036],
+      [q.q90, 0.145], [q.q95, 0.315], [q.q99, 0.64], [1.0, 0.90],
+    ],
+    evolution: [
+      [0.0, 0.0], [q.q25, 0.014], [q.q50, 0.040], [q.q75, 0.105],
+      [q.q90, 0.230], [q.q95, 0.400], [q.q99, 0.70], [1.0, 0.92],
+    ],
+    dense: [
+      [0.0, 0.0], [q.q25, 0.0], [q.q50, 0.0], [q.q75, 0.0],
+      [q.q90, 0.050], [q.q95, 0.220], [q.q99, 0.70], [1.0, 0.94],
+    ],
+    void: [
+      [0.0, 0.125], [q.q25, 0.080], [q.q50, 0.020], [q.q75, 0.0],
+      [q.q90, 0.0], [q.q95, 0.0], [q.q99, 0.0], [1.0, 0.0],
+    ],
+  };
+  return (profiles[profile] || profiles.structure).map(([p, a]) => ({ p, a }));
 }
 
 function clamp01(v) { return Math.max(0, Math.min(1, v)); }
@@ -81,13 +96,21 @@ export class TransferFunction {
     this.texture.minFilter = this.texture.magFilter = LinearFilter;
     this.texture.wrapS = this.texture.wrapT = ClampToEdgeWrapping;
     this.theme = null;
+    this.alphaProfile = "structure";
     this.setRecommendedStable();
   }
 
   setRecommendedStable(theme = this.theme) {
     if (theme) this.theme = theme;
+    this.alphaProfile = "structure";
     this.colorAnchors = colorStops(this.q, this.theme).map((s) => ({ p: s.p, c: [...s.c] }));
-    this.alphaAnchors = alphaStops(this.q).map((s) => ({ p: s.p, a: s.a }));
+    this.alphaAnchors = alphaStops(this.q, this.alphaProfile).map((s) => ({ p: s.p, a: s.a }));
+    this.build();
+  }
+
+  setAlphaProfile(profile = "structure") {
+    this.alphaProfile = profile;
+    this.alphaAnchors = alphaStops(this.q, profile).map((s) => ({ p: s.p, a: s.a }));
     this.build();
   }
 

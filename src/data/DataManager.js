@@ -22,7 +22,11 @@ export class DataManager {
     this.labelInflight = new Map();
     this.labelLimit = 6;
     this.networkCache = new Map();
+<<<<<<< HEAD
     this.networkInflight = new Map();
+=======
+    this.networkCacheLimit = 24;
+>>>>>>> 71709beb1965ef6957c97889916a07434acb0364
     this.preview = null;
     this.previewGradient = null;
     this.previewTex = null;
@@ -173,11 +177,136 @@ export class DataManager {
   }
 
   getCachedVolumeSet(step) {
+<<<<<<< HEAD
     if (!this.cache.has(step)) return null;
     const entry = this.cache.get(step);
     entry.ts = performance.now();
     return entry;
   }
+=======
+    const entry = this.cache.get(step);
+    if (!entry) return null;
+    entry.ts = performance.now();
+    return entry;
+  }
+
+  buildNetwork(step, model = "fixed") {
+    const key = `${step}:${model}`;
+    if (this.networkCache.has(key)) return this.networkCache.get(key);
+    const n = this.previewN;
+    const vox = n * n * n;
+    const off = step * vox;
+    const src = this.preview;
+    const config = {
+      fixed: { maxPoints: 620, stride: 2, radius: 0.118, neighbors: 2, minValue: 16 },
+      varying: { maxPoints: 780, stride: 2, radius: 0.146, neighbors: 3, minValue: 12 },
+      nearest: { maxPoints: 840, stride: 2, radius: 0.158, neighbors: 3, minValue: 12 },
+    }[model] || { maxPoints: 760, stride: 2, radius: 0.14, neighbors: 3, minValue: 12 };
+    const candidates = [];
+    const idx = (x, y, z) => x + n * (y + n * z);
+    for (let z = 1; z < n - 1; z += config.stride) {
+      for (let y = 1; y < n - 1; y += config.stride) {
+        for (let x = 1; x < n - 1; x += config.stride) {
+          const v = src[off + idx(x, y, z)];
+          if (v < config.minValue) continue;
+          const nx = x / (n - 1) - 0.5;
+          const ny = y / (n - 1) - 0.5;
+          const nz = z / (n - 1) - 0.5;
+          const centerBias = 1.0 - Math.min(0.5, Math.hypot(nx, ny, nz) * 0.26);
+          candidates.push({ x: nx, y: ny, z: nz, d: v / 255, score: v * centerBias });
+        }
+      }
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    const nodes = candidates.slice(0, config.maxPoints);
+    const points = new Float32Array(nodes.length * 3);
+    const pointColors = new Float32Array(nodes.length * 3);
+    nodes.forEach((p, i) => {
+      points[i * 3] = p.x;
+      points[i * 3 + 1] = p.y;
+      points[i * 3 + 2] = p.z;
+      const k = Math.max(0, Math.min(1, (p.d - 0.24) / 0.34));
+      const b = 0.38 + 0.54 * Math.pow(k, 0.72);
+      pointColors[i * 3] = b;
+      pointColors[i * 3 + 1] = b;
+      pointColors[i * 3 + 2] = b;
+    });
+
+    const degrees = new Uint16Array(nodes.length);
+    const edges = [];
+    const edgeColors = [];
+    const seen = new Set();
+    const addEdge = (i, j) => {
+      if (i === j) return;
+      const a = Math.min(i, j);
+      const b = Math.max(i, j);
+      const edgeKey = `${a}:${b}`;
+      if (seen.has(edgeKey)) return;
+      seen.add(edgeKey);
+      const pa = nodes[a];
+      const pb = nodes[b];
+      edges.push(pa.x, pa.y, pa.z, pb.x, pb.y, pb.z);
+      const dx = pa.x - pb.x;
+      const dy = pa.y - pb.y;
+      const dz = pa.z - pb.z;
+      const len = Math.hypot(dx, dy, dz);
+      const density = Math.max(0, Math.min(1, ((pa.d + pb.d) * 0.5 - 0.22) / 0.38));
+      const lengthPenalty = Math.min(0.42, len / Math.max(config.radius, 1e-3) * 0.18);
+      const strength = Math.max(0.16, Math.min(1, density - lengthPenalty));
+      const edgeBrightness = 0.22 + 0.56 * Math.pow(strength, 0.82);
+      edgeColors.push(edgeBrightness, edgeBrightness, edgeBrightness, edgeBrightness, edgeBrightness, edgeBrightness);
+      degrees[a]++;
+      degrees[b]++;
+    };
+
+    for (let i = 0; i < nodes.length; i++) {
+      const p = nodes[i];
+      const localRadius = model === "varying"
+        ? config.radius * (0.72 + p.d * 0.72)
+        : config.radius;
+      const r2 = localRadius * localRadius;
+      const best = [];
+      for (let j = 0; j < nodes.length; j++) {
+        if (i === j) continue;
+        const q = nodes[j];
+        const dx = p.x - q.x;
+        const dy = p.y - q.y;
+        const dz = p.z - q.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (model !== "nearest" && d2 > r2) continue;
+        if (model === "nearest" && d2 > r2 * 1.7 && best.length >= config.neighbors) continue;
+        best.push([d2, j]);
+      }
+      best.sort((a, b) => a[0] - b[0]);
+      for (const [, j] of best.slice(0, config.neighbors)) addEdge(i, j);
+    }
+
+    const degreeBins = Array.from({ length: 24 }, () => 0);
+    let degreeSum = 0;
+    for (const d of degrees) {
+      const clamped = Math.min(50, d);
+      degreeBins[Math.min(23, Math.floor((clamped / 50) * 24))]++;
+      degreeSum += d;
+    }
+    const network = {
+      step,
+      model,
+      points,
+      lines: new Float32Array(edges),
+      pointColors,
+      lineColors: new Float32Array(edgeColors),
+      pointCount: nodes.length,
+      lineCount: edges.length / 6,
+      degreeBins,
+      averageDegree: degrees.length ? degreeSum / degrees.length : 0,
+      componentLabel: model === "fixed" ? "定长连接" : model === "varying" ? "自适应连接" : "近邻连接",
+    };
+    this.networkCache.set(key, network);
+    while (this.networkCache.size > this.networkCacheLimit) this.networkCache.delete(this.networkCache.keys().next().value);
+    return network;
+  }
+
+>>>>>>> 71709beb1965ef6957c97889916a07434acb0364
   getVolumeTexture(step) {
     return this.getVolumeSet(step).then((entry) => entry.volumeTex);
   }

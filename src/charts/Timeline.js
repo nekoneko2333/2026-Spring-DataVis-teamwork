@@ -14,7 +14,7 @@ export class Timeline {
     this.margin = { top: 16, right: 14, bottom: 18, left: 14 };
     this.layout = "linear";
     this.theme = null;
-    this.giniColor = d3.scaleSequential(d3.interpolateRgbBasis(["#2563eb", "#0d8c8a", "#d97706"]))
+    this.giniColor = d3.scaleSequential(d3.interpolateRgbBasis(["#7f8796", "#a6b2bd", "#d3d8df"]))
       .domain(d3.extent(this.gini));
     this.rScale = d3.scaleSqrt().domain(d3.extent(this.highFrac)).range([1.5, 5]);
     this.lin = d3.scaleLinear().domain([0, this.N - 1]);

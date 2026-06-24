@@ -33,6 +33,7 @@ uniform float uLoClip;        // void 闃堝€?
 uniform bool  uBrushActive;
 uniform float uBrushMin;
 uniform float uBrushMax;
+uniform float uBrushBoost;
 uniform float uGradScale;
 uniform vec3  uLightDir;
 uniform float uTime;
@@ -167,8 +168,9 @@ void main() {
         vec3 H = normalize(L + V);
         float diff = clamp(dot(N, L), 0.0, 1.0);
         float spec = pow(clamp(dot(N, H), 0.0, 1.0), 32.0);
+        float rim = pow(1.0 - abs(dot(N, V)), 2.0);
         vec3 base = texture(uTF, vec2(uIso, 0.5)).rgb;
-        col = base * (0.30 + 0.8 * diff) + vec3(0.9, 0.95, 1.0) * spec * 0.6;
+        col = base * (0.24 + 1.18 * diff) + vec3(1.0) * (spec * 1.12 + rim * 0.38);
         alpha = 1.0;
         break;
       }
@@ -184,7 +186,7 @@ void main() {
         float diff = 0.5 + 0.5 * clamp(dot(N, L), 0.0, 1.0);
         float a = (0.12 + 0.55 * k);
         a = 1.0 - pow(1.0 - clamp(a, 0.0, 1.0), dt * 256.0);
-        col += (1.0 - alpha) * a * glow * (0.6 + 0.7 * diff) * (1.3 + k);
+        col += (1.0 - alpha) * a * glow * (0.55 + 1.35 * diff) * (2.15 + 1.8 * k);
         alpha += (1.0 - alpha) * a;
       }
       t += dt; continue;
@@ -194,9 +196,10 @@ void main() {
     if (uMode == 4) {
       if (d <= uLoClip) {
         float k = clamp((uLoClip - d) / max(uLoClip, 1e-3), 0.0, 1.0);
-        vec3 mist = mix(uVoidLow, uVoidHigh, k);
-        float a = 0.018 + 0.05 * k;
-        col += (1.0 - alpha) * a * mist;
+        float shell = smoothstep(0.05, 1.0, k);
+        vec3 mist = mix(uVoidLow, uVoidHigh, shell);
+        float a = 0.040 + 0.125 * shell;
+        col += (1.0 - alpha) * a * mist * (0.85 + 1.35 * shell);
         alpha += (1.0 - alpha) * a;
       }
       t += dt; continue;
@@ -232,22 +235,28 @@ void main() {
     }
 
     float stepLen = min(adaptiveStep(dt, src.a, grad, rd), tEnd - t);
-    float sampleOpacity = clamp(src.a * uDensityScale, 0.0, 1.0);
+    float brushBoost = (uBrushActive && gate > 0.0) ? uBrushBoost : 1.0;
+    float sampleOpacity = clamp(src.a * uDensityScale * brushBoost, 0.0, 1.0);
     float shadow = 1.0;
     if (gate > 0.0 && sampleOpacity > 0.03 && max(diff, spec * src.a) > 0.02) {
       shadow = shadowTransmittance(pos, stepLen, L);
     }
 
-    vec3 ambient = src.rgb * 0.16;
-    vec3 direct = src.rgb * (0.64 * diff);
-    vec3 highlight = uHighlight * spec * 0.16 * src.a;
-    vec3 lit = ambient + shadow * (direct + highlight);
+    float densityGlow = smoothstep(0.54, 1.0, d);
+    float rim = pow(1.0 - abs(dot(N, V)), 2.0);
+    vec3 ambient = src.rgb * 0.12;
+    vec3 direct = src.rgb * (0.72 * diff);
+    vec3 glowTerm = src.rgb * densityGlow * (0.66 + 1.25 * densityGlow);
+    vec3 rimTerm = src.rgb * rim * (0.18 + 0.58 * densityGlow);
+    vec3 highlight = uHighlight * spec * (0.24 + 0.62 * densityGlow) * src.a;
+    vec3 lit = ambient + shadow * (direct + highlight) + glowTerm + rimTerm;
     if (uAtlasActive && atlasClass >= 1 && atlasOn) {
       lit = mix(lit, atlasColor * (0.20 + shadow * (0.35 + 0.65 * diff)), uAtlasOpacity);
     }
 
     float a = 1.0 - pow(1.0 - sampleOpacity, stepLen * 256.0);
     a *= gate;
+    lit *= mix(1.0, 1.28, clamp(brushBoost - 1.0, 0.0, 1.0));
     col += (1.0 - alpha) * a * lit;
     alpha += (1.0 - alpha) * a;
     t += stepLen;
@@ -255,12 +264,16 @@ void main() {
 
   if (uMode == 1) {
     if (maxd <= 0.001) { outColor = vec4(0.0); return; }
-    vec3 c = texture(uTF, vec2(maxd, 0.5)).rgb;
-    c = pow(c, vec3(0.85)) * (0.6 + 1.1 * maxd);
-    outColor = vec4(c, 1.0);
+    float k = smoothstep(0.18, 0.96, maxd);
+    vec3 tf = texture(uTF, vec2(maxd, 0.5)).rgb;
+    vec3 base = mix(vec3(0.015, 0.018, 0.026), tf, 0.76);
+    vec3 c = pow(max(base, vec3(0.0)), vec3(1.16)) * (0.18 + 0.95 * k);
+    c += vec3(0.95, 0.98, 1.0) * pow(k, 4.0) * 0.20;
+    outColor = vec4(c, 0.32 + 0.68 * k);
     return;
   }
 
-  outColor = vec4(col, alpha);
+  vec3 finalCol = pow(max(col * 1.18, vec3(0.0)), vec3(0.86));
+  outColor = vec4(finalCol, alpha);
 }
 `;

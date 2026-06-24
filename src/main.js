@@ -23,12 +23,21 @@ class App {
     this.labelTimer = null;
     this.playTimer = null;
     this.lastStepTime = 0;
-    this.stepInterval = 78; // ms, ≈13 步/s 播放
-    this.playbackSteps = 88; // 播放时降低 ray-march 步进数(弱机更流畅)
+    this.stepInterval = 160; // ms，探索播放按关键帧推进，避免相邻 step 变化太弱
+    this.playbackStride = 3; // 每帧跨 3 个数据步，接近手动拖动时的可见变化
+    this.playbackSteps = 128; // 播放时保留足够 ray-march 步进，避免体渲染发糊
+    this.cinematicSteps = 96;
+    this.storyTweenLastStep = -1;
+    this.chapterFxTimer = null;
+    this.networkModel = "fixed";
+    this.networkVisible = true;
+    this.renderPreset = "structure";
+    this.storyExporting = false;
     this.tabCharts = {};
-    this.page = "render";
+    this.page = "showcase";
     this.themeName = DEFAULT_THEME;
     this.theme = THEMES[this.themeName];
+    this.storyProgressFrame = null;
   }
 
   async start() {
@@ -47,11 +56,12 @@ class App {
     this._buildUI();
     this._bindEvents();
     this._applyTheme(this.themeName);
-    this._setPage("render");
+    this._setPage("showcase");
 
     await this.applyStep(0, { force: true });
     this._setView(0);
     $("#loadingOverlay").classList.add("hidden");
+    this._enterCinematicHome();
     setTimeout(() => this._resizeAll(), 60);
   }
 
@@ -85,8 +95,8 @@ class App {
       this._timelineLegendHTML();
     // 统计格
     this.statKeys = [
-      ["max", "max log ρ", "gold"], ["mean", "mean", ""], ["std", "std", ""], ["median", "median", ""],
-      ["skewness", "偏度", "cyan"], ["kurtosis", "峰度", "cyan"], ["gini", "Gini", "gold"], ["entropy", "熵", "cyan"],
+      ["max", "max ρ", "gold"], ["mean", "mean", ""], ["std", "std", ""], ["median", "median", ""],
+      ["skewness", "skew", "cyan"], ["kurtosis", "kurt", "cyan"], ["gini", "Gini", "gold"], ["entropy", "entropy", "cyan"],
     ];
     $("#statGrid").innerHTML = this.statKeys.map(([k, lbl, cls]) =>
       `<div class="stat-cell"><div class="k">${lbl}</div><div class="v ${cls}" id="stat-${k}">—</div></div>`).join("");
@@ -96,6 +106,20 @@ class App {
       `<div class="morph-row"><span class="name">${lbl}</span><div class="bar"><div id="morph-${k}" style="background:${c}"></div></div><span class="pct" id="morphpct-${k}">—</span></div>`).join("");
     // atlas 控制
     $("#atlasControls").innerHTML = `
+      <div class="topology-hint"><span>亮节点 = 高密度</span><span>亮边 = 强连接</span></div>
+      <div class="network-models" id="networkModels">
+        <h3>拓扑模型</h3>
+        <button data-model="fixed" class="active">定长</button>
+        <button data-model="varying">自适应</button>
+        <button data-model="nearest">近邻</button>
+        <div class="network-rule" id="networkRule">固定半径</div>
+      </div>
+      <div class="degree-panel">
+        <h3>平均度</h3>
+        <div class="component-label" id="componentLabel">弱连接</div>
+        <div id="degreeChart" class="degree-chart"></div>
+        <div class="degree-readout"><span>k</span><strong id="degreeValue">—</strong></div>
+      </div>
       <div class="method-switch" id="methodSwitch">
         <button data-method="tweb" class="active">T-web (势场)</button>
         <button data-method="proxy">density-Hessian</button>
@@ -113,6 +137,9 @@ class App {
       <button id="probeClear" class="action" style="padding:4px 10px">清除探针</button>`;
     this._renderTFEditor();
     this._syncTFControls();
+    this._prepareCinematicMetrics();
+    this._buildCinematicOverlay();
+    $("#btnStory").textContent = "短片";
   }
 
   _timelineLegendHTML() {
@@ -277,16 +304,202 @@ class App {
     $("#isoValue").value = String(state.tf.isoValue);
   }
 
-  _applyRecommendedTF() {
-    state.tf.densityScale = 0.80;
-    state.tf.steps = 256;
-    state.tf.isoValue = 0.40;
+  _prepareCinematicMetrics() {
+    const steps = state.stats.steps;
+    const extent = (values) => {
+      const e = d3.extent(values);
+      return { min: e[0] ?? 0, max: e[1] ?? 1 };
+    };
+    this.cineRanges = {
+      gini: extent(steps.map((s) => s.gini)),
+      variance: extent(steps.map((s) => s.variance)),
+      max: extent(steps.map((s) => s.max)),
+    };
+    const morphSrc = state.morphology?.tweb?.steps || state.morphology?.steps || [];
+    this.cineRanges.void = extent(morphSrc.map((s) => s.fractions?.void ?? 0));
+  }
 
-    this.tf.setRecommendedStable(this.theme);
+  _buildCinematicOverlay() {
+    const viewport = $("#viewport");
+    if ($("#cinematicOverlay") || !viewport) return;
+    const overlay = document.createElement("div");
+    overlay.id = "cinematicOverlay";
+    overlay.className = "cinematic-overlay hidden";
+    overlay.innerHTML = `
+      <div class="cinema-starfield" aria-hidden="true"></div>
+      <svg class="cinema-network" viewBox="0 0 1200 700" preserveAspectRatio="none" aria-hidden="true">
+        <g class="network-lines">
+          <path d="M66 518 L178 426 L318 458 L456 328 L612 372 L760 238 L916 292 L1088 178" />
+          <path d="M142 188 L286 246 L456 328 L584 154 L760 238 L982 112" />
+          <path d="M318 458 L390 592 L612 372 L716 534 L916 292 L1050 508" />
+          <path d="M178 426 L286 246 L584 154 L612 372 L716 534" />
+          <path d="M456 328 L760 238 L1050 508" />
+        </g>
+        <g class="network-nodes">
+          <circle cx="66" cy="518" r="2.6" /><circle cx="178" cy="426" r="3.2" />
+          <circle cx="318" cy="458" r="4.2" /><circle cx="456" cy="328" r="5.4" />
+          <circle cx="612" cy="372" r="4.6" /><circle cx="760" cy="238" r="5.8" />
+          <circle cx="916" cy="292" r="4.2" /><circle cx="1088" cy="178" r="3.2" />
+          <circle cx="142" cy="188" r="2.8" /><circle cx="286" cy="246" r="3.6" />
+          <circle cx="584" cy="154" r="4.8" /><circle cx="982" cy="112" r="3.4" />
+          <circle cx="390" cy="592" r="2.8" /><circle cx="716" cy="534" r="4.0" />
+          <circle cx="1050" cy="508" r="3.8" />
+        </g>
+      </svg>
+      <div class="cinema-titleblock">
+        <div class="cinema-kicker" id="cineKicker">NYX COSMIC WEB / DENSITY NETWORK</div>
+        <h2 id="cineTitle">Cosmic Web</h2>
+        <p id="cineText">从近乎均匀的密度涨落开始，重建片层、丝状连接、节点塌缩和低密度空洞逐渐成形的过程。</p>
+        <div class="cinema-hero-actions">
+          <button id="cinemaStart" type="button">播放生成短片</button>
+          <button id="cinemaExploreHome" type="button">进入数据探索</button>
+        </div>
+      </div>
+      <div class="cinema-metrics" aria-label="cinematic metrics">
+        <div class="metric-primary">
+          <span>Web Maturity</span>
+          <strong id="cineMaturity">0%</strong>
+          <i><b id="cineMaturityBar"></b></i>
+        </div>
+        <div class="metric-grid">
+          <div><span>Stage</span><strong id="cineStage">Seed</strong></div>
+          <div><span>Gini</span><strong id="cineGini">0.000</strong></div>
+          <div><span>Void</span><strong id="cineVoid">0.0%</strong></div>
+          <div><span>Max log rho</span><strong id="cineMax">0.00</strong></div>
+        </div>
+      </div>
+      <div class="cinema-progress" aria-label="story progress">
+        <div class="cinema-progress-track"><b id="cineProgressFill"></b></div>
+        <div class="cinema-chapters">
+          <span>初始微扰</span><span>片层坍缩</span><span>丝状连接</span><span>节点增长</span><span>空洞成熟</span>
+        </div>
+      </div>
+      <div class="cinema-actions">
+        <button id="cinemaReplay" type="button">重看短片</button>
+        <button id="cinemaExplore" type="button">进入探索模式</button>
+      </div>`;
+    const skip = document.createElement("button");
+    skip.id = "cinemaSkip";
+    skip.type = "button";
+    skip.className = "cinema-skip";
+    skip.textContent = "跳到最终结构";
+    overlay.appendChild(skip);
+    viewport.appendChild(overlay);
+    $("#cinemaStart").addEventListener("click", () => { void this._startStory(); });
+    $("#cinemaExploreHome").addEventListener("click", () => this._exitCinematic({ restoreCamera: false, page: "explore" }));
+    $("#cinemaReplay").addEventListener("click", () => { void this._startStory(); });
+    $("#cinemaExplore").addEventListener("click", () => this._exitCinematic({ restoreCamera: false, page: "explore" }));
+    $("#cinemaSkip").addEventListener("click", () => this._finishCinematic());
+  }
+
+  _normMetric(value, range) {
+    const span = Math.max(range.max - range.min, 1e-9);
+    return Math.max(0, Math.min(1, (value - range.min) / span));
+  }
+
+  _maturityForStep(step) {
+    const s = state.stats.steps[step];
+    const morphSrc = state.morphology?.tweb?.steps || state.morphology?.steps || [];
+    const voidFrac = morphSrc[step]?.fractions?.void ?? 0;
+    const score =
+      0.42 * this._normMetric(s.gini, this.cineRanges.gini) +
+      0.24 * this._normMetric(s.variance, this.cineRanges.variance) +
+      0.22 * this._normMetric(s.max, this.cineRanges.max) +
+      0.12 * this._normMetric(voidFrac, this.cineRanges.void);
+    return Math.round(Math.max(0, Math.min(1, score)) * 100);
+  }
+
+  _stageForStep(step) {
+    if (step < 16) return "初始微扰";
+    if (step < 38) return "片层坍缩";
+    if (step < 66) return "丝状连接";
+    if (step < 88) return "节点增长";
+    return "空洞成熟";
+  }
+
+  _stageIndexForStep(step) {
+    if (step < 16) return 0;
+    if (step < 38) return 1;
+    if (step < 66) return 2;
+    if (step < 88) return 3;
+    return 4;
+  }
+
+  _updateStageJumps(step = state.step) {
+    const idx = this._stageIndexForStep(step);
+    document.querySelectorAll("#stageJumps button").forEach((b, i) => b.classList.toggle("active", i === idx));
+  }
+
+  _updateCinematicHUD(step = state.step) {
+    if (!$("#cinematicOverlay")) return;
+    const s = state.stats.steps[step];
+    const morphSrc = state.morphology?.tweb?.steps || state.morphology?.steps || [];
+    const voidFrac = morphSrc[step]?.fractions?.void ?? 0;
+    const maturity = this._maturityForStep(step);
+    $("#cineMaturity").textContent = `${maturity}%`;
+    $("#cineMaturityBar").style.width = `${maturity}%`;
+    $("#cineProgressFill").style.width = `${(step / Math.max(1, state.meta.timeSteps - 1)) * 100}%`;
+    $("#cineStage").textContent = this._stageForStep(step);
+    $("#cineGini").textContent = d3.format(".3f")(s.gini);
+    $("#cineVoid").textContent = `${(voidFrac * 100).toFixed(1)}%`;
+    $("#cineMax").textContent = s.max.toFixed(2);
+    const chapterIndex = step < 16 ? 0 : step < 38 ? 1 : step < 66 ? 2 : step < 88 ? 3 : 4;
+    document.querySelectorAll(".cinema-chapters span").forEach((el, i) => {
+      const active = i === chapterIndex;
+      el.classList.toggle("active", active);
+    });
+  }
+
+  _setCinematicChapter(kicker, title, text) {
+    const overlay = $("#cinematicOverlay");
+    overlay?.classList.add("chapter-changing");
+    clearTimeout(this.chapterFxTimer);
+    this.chapterFxTimer = setTimeout(() => overlay?.classList.remove("chapter-changing"), 520);
+    $("#cineKicker").textContent = kicker;
+    $("#cineTitle").textContent = title;
+    $("#cineText").textContent = text;
+    $("#storyCaption").innerHTML = `<span class="chapter">${kicker}</span>${text}`;
+  }
+
+  _applyRecommendedTF() {
+    this._applyRenderPreset("structure");
+  }
+
+  _applyRenderPreset(name = "structure") {
+    const presets = {
+      structure: { mode: 0, density: 0.80, steps: 256, iso: 0.40, alpha: "structure", brush: null, atlas: false },
+      evolution: { mode: 0, density: 1.18, steps: 288, iso: 0.40, alpha: "evolution", brush: null, atlas: false },
+      dense: { mode: 3, density: 1.02, steps: 256, iso: 0.54, alpha: "dense", brush: null, atlas: false },
+      void: { mode: 4, density: 0.92, steps: 256, iso: 0.28, alpha: "void", brush: null, atlas: false },
+    };
+    const p = presets[name] || presets.structure;
+    this.renderPreset = name;
+    state.tf.densityScale = p.density;
+    state.tf.steps = p.steps;
+    state.tf.isoValue = p.iso;
+    state.atlas.active = p.atlas;
+
+    this.tf.setAlphaProfile(p.alpha);
     this.renderer.setDensityScale(state.tf.densityScale);
     this.renderer.setSteps(state.playing ? Math.min(state.tf.steps, this.playbackSteps) : state.tf.steps);
     this.renderer.setIso(state.tf.isoValue);
+    this.renderer.setAtlas(state.atlas.active, state.atlas.opacity, state.atlas.classes);
+    $("#btnAtlas").classList.toggle("active", state.atlas.active);
 
+    this._clearBrush();
+    this._setMode(p.mode);
+    if (p.brush && p.mode === 0) {
+      const ranges = {
+        void: [0, this.percent("25")],
+        top1: [this.percent("99"), 1],
+      };
+      const [min, max] = ranges[p.brush];
+      state.brush = { active: true, min, max, label: p.brush };
+      this.renderer.setBrush(true, min, max);
+      this.histogram.setRangeNorm(min, max);
+    }
+
+    document.querySelectorAll("#renderPresets button").forEach((b) => b.classList.toggle("active", b.dataset.preset === name));
     this._syncTFControls();
     this._refreshTFViews();
     this._renderTFEditor();
@@ -296,11 +509,24 @@ class App {
   _bindEvents() {
     $("#pageTabs").addEventListener("click", (e) => {
       const b = e.target.closest("button"); if (!b) return;
-      this._setPage(b.dataset.page);
+      const page = b.dataset.page;
+      if (page === "showcase") {
+        this._enterCinematicHome();
+      } else if (state.story.running || $("#app").classList.contains("story-mode")) {
+        this._exitCinematic({ restoreCamera: false, restorePage: false, restoreRenderState: false, page });
+      } else {
+        this._setPage(page);
+      }
     });
 
     $("#timeSlider").addEventListener("input", (e) => { this.pause(); this.setStep(+e.target.value); });
     $("#btnPlay").addEventListener("click", () => this.togglePlay());
+    $("#stageJumps").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      this.pause();
+      this.setStep(+b.dataset.step);
+      if (this.page === "showcase") this._setPage("explore");
+    });
 
     $("#modeTabs").addEventListener("click", (e) => {
       const b = e.target.closest("button"); if (!b) return;
@@ -318,22 +544,33 @@ class App {
     });
 
     $("#tfRecommend").addEventListener("click", () => this._applyRecommendedTF());
+    $("#renderPresets").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      this._applyRenderPreset(b.dataset.preset);
+    });
 
     $("#densityScale").addEventListener("input", (e) => {
       state.tf.densityScale = +e.target.value;
       this.renderer.setDensityScale(state.tf.densityScale);
+      document.querySelectorAll("#renderPresets button").forEach((b) => b.classList.remove("active"));
     });
     $("#stepQuality").addEventListener("input", (e) => {
       state.tf.steps = +e.target.value;
       this.renderer.setSteps(state.playing ? Math.min(state.tf.steps, this.playbackSteps) : state.tf.steps);
+      document.querySelectorAll("#renderPresets button").forEach((b) => b.classList.remove("active"));
     });
     $("#isoValue").addEventListener("input", (e) => {
       state.tf.isoValue = +e.target.value;
       this.renderer.setIso(state.tf.isoValue);
+      document.querySelectorAll("#renderPresets button").forEach((b) => b.classList.remove("active"));
     });
 
     // atlas
     $("#btnAtlas").addEventListener("click", () => this._toggleAtlas());
+    $("#networkModels").addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      this._setNetworkModel(b.dataset.model);
+    });
     $("#clsToggles").addEventListener("click", (e) => {
       const t = e.target.closest(".cls-toggle"); if (!t) return;
       const c = t.dataset.cls; state.atlas.classes[c] = !state.atlas.classes[c];
@@ -367,6 +604,8 @@ class App {
 
     // story
     $("#btnStory").addEventListener("click", () => this._toggleStory());
+    $("#btnExport").addEventListener("click", () => this._exportStoryVideo());
+    $("#btnTopology").addEventListener("click", () => this._toggleTopology());
 
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") { this._toggleProbe(false); } });
     window.addEventListener("resize", () => this._resizeAll());
@@ -385,18 +624,21 @@ class App {
   }
 
   _setPage(page) {
-    const pages = new Set(["render", "stats", "brush", "web"]);
-    if (!pages.has(page)) page = "render";
+    const legacy = { render: "explore", stats: "charts", brush: "params", web: "explore" };
+    page = legacy[page] || page;
+    const pages = new Set(["showcase", "explore", "params", "charts"]);
+    if (!pages.has(page)) page = "explore";
     this.page = page;
     $("#app").dataset.page = page;
-    if (this.renderer) this.renderer.setActive(page !== "stats");
+    if (this.renderer) this.renderer.setActive(page !== "charts");
+    this._syncPageChrome(page);
     document.querySelectorAll("#pageTabs button").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
 
     const preferredTab = {
-      render: this._tab || "hist",
-      stats: this._tab && this._tab !== "probe" ? this._tab : "fingerprint",
-      brush: this._tab === "probe" ? "probe" : "hist",
-      web: this._tab === "power" ? "power" : "series",
+      showcase: this._tab || "hist",
+      explore: this._tab || "hist",
+      params: this._tab === "probe" ? "probe" : "hist",
+      charts: this._tab && this._tab !== "probe" ? this._tab : "fingerprint",
     }[page];
     this._setTab(preferredTab);
 
@@ -410,7 +652,15 @@ class App {
     state.step = step;
     $("#timeSlider").value = step;
     $("#stepLabel").textContent = `t = ${String(step).padStart(4, "0")}`;
+<<<<<<< HEAD
     if (!storyPlayback) {
+=======
+    this._updateStageJumps(step);
+    if (state.story.running || $("#app").classList.contains("story-mode")) this._updateCinematicHUD(step);
+    const skipChartUpdates = fromPlayback && state.story.running;
+    if (!skipChartUpdates) {
+      // 图表联动
+>>>>>>> 71709beb1965ef6957c97889916a07434acb0364
       this.histogram.update(step, state.histograms.matrix[step]);
       this.fingerprint.update(step); this.series.update(step);
       this.power.update(step); this.timeline.update(step);
@@ -418,6 +668,7 @@ class App {
       if (state.brush.active) this._updateSelStats(step);
       if (this.histogram.tf) { /* recolored on tf change */ }
     }
+<<<<<<< HEAD
 
     // 低分辨率即时显示
     const cached = !fromPlayback ? this.dm.getCachedVolumeSet(step) : null;
@@ -426,14 +677,33 @@ class App {
       this.renderer.setGradientTexture(cached.gradientTex, cached.gradientScale);
       $("#loadState").textContent = "full-res";
     } else {
+=======
+    if (!fromPlayback || this.networkVisible) this._updateNetworkLayer(step);
+
+    const cached = fromPlayback ? this.dm.getCachedVolumeSet(step) : null;
+    if (cached) {
+      this.renderer.setVolumeTexture(cached.volumeTex);
+      this.renderer.setGradientTexture(cached.gradientTex, cached.gradientScale);
+      $("#loadState").textContent = "● 全分辨率(缓存)";
+    } else {
+      // 低分辨率即时显示
+>>>>>>> 71709beb1965ef6957c97889916a07434acb0364
       this.renderer.setVolumeTexture(this.dm.getPreviewTexture(step));
       {
         const previewGrad = this.dm.getPreviewGradientTexture(step);
         this.renderer.setGradientTexture(previewGrad.texture, previewGrad.scale);
       }
+<<<<<<< HEAD
       $("#loadState").textContent = fromPlayback ? "preview playback" : "preview";
     }
     if (!fromPlayback) this.dm.prefetch(step, this._dir || 1, 2);
+=======
+      $("#loadState").textContent = fromPlayback ? "○ 预览(播放)" : "○ 预览";
+    }
+
+    // 预取
+    this.dm.prefetch(step, this._dir || 1, fromPlayback ? 4 : 2);
+>>>>>>> 71709beb1965ef6957c97889916a07434acb0364
 
     if (state.renderMode === 5) this._scheduleMesh(step);
     if (!fromPlayback) {
@@ -502,11 +772,39 @@ class App {
   togglePlay() { state.playing ? this.pause() : this.play(); }
   play() {
     if (state.playing) return;
+    const last = state.meta.timeSteps - 1;
+    if (state.step >= last) this.setStep(0);
     state.playing = true;
     $("#btnPlay").textContent = "❚❚";
     this.renderer.setSteps(Math.min(state.tf.steps, this.playbackSteps));
+    this.dm.prefetch(state.step, 1, Math.max(8, this.playbackStride * 4));
     clearInterval(this.playTimer);
     this.playTimer = setInterval(() => this._tick(), this.stepInterval);
+  }
+
+  _syncPageChrome(page = this.page) {
+    const compact = page === "explore";
+    const labels = compact
+      ? {
+          timeline: ["时间", ""],
+          tf: ["视图", ""],
+          stat: ["状态", ""],
+          morph: ["拓扑", ""],
+        }
+      : {
+          timeline: ["时间控制", "Time evolution"],
+          tf: ["传递函数", "Transfer function"],
+          stat: ["当前统计", "Current step"],
+          morph: ["宇宙网形态", "Cosmic web"],
+        };
+    $("#timelinePanelTitle").textContent = labels.timeline[0];
+    $("#timelinePanelSub").textContent = labels.timeline[1];
+    $("#tfPanelTitle").textContent = labels.tf[0];
+    $("#tfPanelSub").textContent = labels.tf[1];
+    $("#statPanelTitle").textContent = labels.stat[0];
+    $("#statPanelSub").textContent = labels.stat[1];
+    $("#morphPanelTitle").textContent = labels.morph[0];
+    $("#morphPanelSub").textContent = labels.morph[1];
   }
   pause() {
     if (!state.playing) return;
@@ -522,8 +820,14 @@ class App {
   _tick() {
     if (!state.playing) return;
     this._dir = 1;
-    const next = (state.step + 1) % state.meta.timeSteps;
+    const last = state.meta.timeSteps - 1;
+    if (state.step >= last) {
+      this.pause();
+      return;
+    }
+    const next = Math.min(last, state.step + this.playbackStride);
     this.applyStep(next, { fromPlayback: true });
+    if (next >= last) this.pause();
   }
 
   // ---------------- mode / brush ----------------
@@ -600,6 +904,30 @@ class App {
     }
   }
 
+  _setNetworkModel(model = "nearest") {
+    this.networkModel = model;
+    document.querySelectorAll("#networkModels button").forEach((b) => b.classList.toggle("active", b.dataset.model === model));
+    this._updateNetworkRule(model);
+    this._setTopologyVisible(true);
+    this._clearBrush();
+    this._setMode(0);
+    this.renderer.setAtlas(state.atlas.active, state.atlas.opacity, state.atlas.classes);
+    $("#btnAtlas").classList.toggle("active", state.atlas.active);
+    if (state.atlas.active) this._scheduleLabel(state.step);
+    this._updateNetworkLayer(state.step);
+  }
+
+  _updateNetworkRule(model = this.networkModel || "fixed") {
+    const el = $("#networkRule");
+    if (!el) return;
+    const labels = {
+      fixed: "固定半径",
+      varying: "局部半径",
+      nearest: "近邻连接",
+    };
+    el.textContent = labels[model] || labels.fixed;
+  }
+
   _activateAtlasFromControls() {
     state.atlas.active = true;
     $("#btnAtlas").classList.add("active");
@@ -614,7 +942,7 @@ class App {
     $("#probeHint").classList.toggle("hidden", !on);
     if (on) {
       this.renderer.enablePicking((line) => this._onProbe(line));
-      this._setPage("brush");
+      this._setPage("params");
       this._setTab("probe");
     } else {
       this.renderer.disablePicking();
@@ -636,6 +964,7 @@ class App {
     if (isFinite(lo)) this.histogram.setRangeNorm(lo, hi);
   }
 
+<<<<<<< HEAD
   _ensureNetworkInset() {
     let el = $("#networkInset");
     if (!el) {
@@ -822,14 +1151,268 @@ class App {
       await wait(1200);
       this._stopStory();
     })();
+=======
+  _enterCinematicHome() {
+    state.story.running = false;
+    this.pause();
+    this._setPage("showcase");
+    this._clearBrush();
+    this._setMode(0);
+    state.tf.densityScale = 1.05;
+    this.renderer.setDensityScale(state.tf.densityScale);
+    this.renderer.setControlsEnabled(false);
+    this.renderer.setCameraPose([1.86, 0.94, 1.52], [0.12, -0.02, 0]);
+    this._setTopologyVisible(false);
+    $("#app").classList.add("story-mode", "cinema-home");
+    $("#cinematicOverlay").classList.remove("hidden", "running", "complete");
+    $("#cinematicOverlay").classList.add("home");
+    $("#storyCaption").classList.add("hidden");
+    $("#btnStory").textContent = "生成短片";
+    this._setCinematicChapter(
+      "NYX COSMIC WEB / DENSITY NETWORK",
+      "Cosmic Web",
+      "从近乎均匀的密度涨落开始，重建片层、丝状连接、节点塌缩和低密度空洞逐渐成形的过程。"
+    );
+    this._updateCinematicHUD(state.step);
+>>>>>>> 71709beb1965ef6957c97889916a07434acb0364
   }
 
-  _stopStory() {
+  _toggleStory() {
+    if (state.story.running || $("#app").classList.contains("story-mode")) {
+      this._exitCinematic({ restoreCamera: true, restorePage: true, restoreRenderState: true });
+      return;
+    }
+    void this._startStory();
+  }
+
+  _toggleTopology() {
+    this._setTopologyVisible(!this.networkVisible);
+  }
+
+  _setTopologyVisible(visible, { updateButton = true } = {}) {
+    this.networkVisible = !!visible;
+    this.renderer?.setNetworkVisible(this.networkVisible);
+    if (updateButton) {
+      const btn = $("#btnTopology");
+      btn?.classList.toggle("active", this.networkVisible);
+      btn?.setAttribute("aria-pressed", String(this.networkVisible));
+    }
+    const overlay = $("#cinematicOverlay");
+    overlay?.classList.toggle("topology-visible", this.networkVisible);
+    overlay?.classList.toggle("topology-muted", !this.networkVisible);
+  }
+
+  async _exportStoryVideo() {
+    const btn = $("#btnExport");
+    if (this.storyExporting) return;
+    this.storyExporting = true;
+    btn.disabled = true;
+    btn.textContent = "实时";
+    try {
+      alert("已取消固定视频短片。现在首页短片会直接使用实时体渲染，播放期间禁用视角操作，结束或进入探索后恢复旋转。");
+    } finally {
+      this.storyExporting = false;
+      btn.disabled = false;
+      btn.textContent = "导出";
+    }
+  }
+
+  _storyShot(from, to, k) {
+    const ease = (t) => t * t * (3 - 2 * t);
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const mix = (a, b, t) => a.map((v, i) => lerp(v, b[i], t));
+    const t = ease(k);
+    this.renderer.setCameraPose(mix(from.position, to.position, t), mix(from.target, to.target, t));
+  }
+
+  _applyStoryLook({ mode = 0, density = 0.8, brush = null, atlas = false, atlasOpacity = 0.55, topology = false, brushBoost = 1 } = {}) {
+    this._setMode(mode);
+    state.tf.densityScale = density;
+    this.renderer.setDensityScale(density);
+    this._setTopologyVisible(topology, { updateButton: false });
+    if (brush) {
+      const ranges = {
+        // 片层: 取中高密度段 (q50~q95)。灰阶下 q50 以下近黑, 在黑底短片里不可见;
+        // 上抬到有灰度亮度的区间, 墙/片层才看得见, 同时排除最亮的节点 (>q95)。
+        sheet: [this.percent("50"), this.percent("95")],
+        filament: [this.percent("75"), this.percent("95")],
+        node: [this.percent("95"), 1],
+        top1: [this.percent("99"), 1],
+        void: [0, this.percent("25")],
+      };
+      const [mn, mx] = ranges[brush];
+      state.brush = { active: true, min: mn, max: mx, label: brush };
+      this.renderer.setBrush(true, mn, mx, brushBoost);
+      this.histogram.setRangeNorm(mn, mx);
+    } else {
+      this._clearBrush();
+    }
+    state.atlas.active = atlas;
+    state.atlas.opacity = atlasOpacity;
+    $("#btnAtlas").classList.toggle("active", atlas);
+    this.renderer.setAtlas(atlas, atlasOpacity, state.atlas.classes);
+    if (atlas) this._scheduleLabel(state.step);
+  }
+
+  _storyDelay(ms) {
+    return new Promise((resolve) => {
+      this._storyTimer = setTimeout(resolve, ms);
+    });
+  }
+
+  async _transitionStoryLook(look) {
+    const overlay = $("#cinematicOverlay");
+    overlay?.classList.add("look-fade");
+    await this._storyDelay(120);
+    if (!state.story.running) return false;
+    this._applyStoryLook(look);
+    await this._storyDelay(240);
+    overlay?.classList.remove("look-fade");
+    return state.story.running;
+  }
+
+  _tweenStoryStep(fromStep, toStep, duration, fromShot, toShot) {
+    return new Promise((resolve) => {
+      const t0 = performance.now();
+      let lastStep = -1;
+      const run = () => {
+        if (!state.story.running) return resolve(false);
+        const k = Math.min(1, (performance.now() - t0) / duration);
+        const eased = k * k * (3 - 2 * k);
+        const step = Math.round(fromStep + (toStep - fromStep) * eased);
+        if (step !== lastStep) {
+          lastStep = step;
+          this.setStep(step, { fromPlayback: true });
+        }
+        if (fromShot && toShot) this._storyShot(fromShot, toShot, k);
+        if (k < 1) requestAnimationFrame(run);
+        else resolve(true);
+      };
+      run();
+    });
+  }
+
+  async _startStory({ exportMode = false } = {}) {
+    if (state.story.running) return;
+    this.pause();
+    this._clearBrush();
+    if (!$("#app").classList.contains("story-mode")) {
+      this.pageBeforeStory = this.page;
+      this.storyCameraPose = this.renderer.getCameraPose();
+    }
+    this.storySavedRender = {
+      renderMode: state.renderMode,
+      densityScale: state.tf.densityScale,
+      steps: state.tf.steps,
+      atlasActive: state.atlas.active,
+      atlasOpacity: state.atlas.opacity,
+      networkVisible: this.networkVisible,
+      brush: { ...state.brush },
+    };
+
+    state.story.running = true;
+    this.storyExporting = exportMode;
+    this.storyTweenLastStep = -1;
+    this.renderer.setSteps(Math.min(state.tf.steps, exportMode ? 80 : this.cinematicSteps));
+    this.renderer.setControlsEnabled(false);
+    this._setPage("showcase");
+    $("#app").classList.add("story-mode");
+    $("#app").classList.remove("cinema-home");
+    $("#btnStory").textContent = "停止";
+    $("#cinematicOverlay").classList.remove("hidden", "home", "complete");
+    $("#cinematicOverlay").classList.add("running");
+    $("#storyCaption").classList.remove("hidden");
+    this._updateCinematicHUD(state.step);
+
+    const shots = {
+      far: { position: [1.90, 1.02, 1.62], target: [0.12, -0.02, 0.0] },
+      drift: { position: [1.16, 0.58, 1.06], target: [0.08, -0.02, 0.02] },
+      thread: { position: [-0.82, 0.34, 0.86], target: [0.08, 0.03, 0.00] },
+      node: { position: [0.48, 0.28, 0.58], target: [-0.03, 0.02, 0.02] },
+      void: { position: [-0.26, -0.20, 0.70], target: [0.12, 0.08, -0.02] },
+      atlas: { position: [1.12, -0.46, 0.82], target: [0.02, 0.00, 0.00] },
+    };
+
+    const chapters = [
+      {
+        from: 0, to: 14, duration: 4200, shot0: shots.far, shot1: shots.drift,
+        look: { mode: 0, density: 0.86, topology: true },
+        kicker: "STAGE 01 / INITIAL FLUCTUATIONS",
+        title: "初始微扰",
+        text: "宇宙早期的密度场接近均匀，只存在很弱的涨落。后面的网状结构并不是突然出现，而是从这些微小差异被引力逐渐放大开始。",
+      },
+      {
+        from: 14, to: 38, duration: 5000, shot0: shots.drift, shot1: shots.thread,
+        look: { mode: 0, density: 1.18, brush: "sheet", brushBoost: 2.8, topology: true },
+        kicker: "STAGE 02 / SHEETS",
+        title: "片层坍缩",
+        text: "随着涨落增长，物质先在较大的面状区域聚集，形成墙和片层。它们像宇宙网的薄膜边界，随后会被更细的丝状结构连接起来。",
+      },
+      {
+        from: 38, to: 66, duration: 5600, shot0: shots.thread, shot1: shots.node,
+        look: { mode: 0, density: 1.08, brush: "filament", topology: true },
+        kicker: "STAGE 03 / FILAMENTS",
+        title: "丝状连接",
+        text: "片层继续被拉伸和汇聚，中高密度通道逐渐连成细丝。这里显示的是物质运输的主干，也是 cosmic web 最容易被识别的骨架。",
+      },
+      {
+        from: 66, to: 88, duration: 5000, shot0: shots.node, shot1: shots.void,
+        look: { mode: 3, density: 1.10, topology: true },
+        kicker: "STAGE 04 / NODES",
+        title: "节点增长",
+        text: "丝状结构交汇处的密度增长最快，形成最亮的节点。这里不是恒星照片，而是密度场中塌缩最强的位置被高亮出来。",
+      },
+      {
+        from: 88, to: 99, duration: 4600, shot0: shots.void, shot1: shots.atlas,
+        look: { mode: 0, density: 1.08, atlas: true, atlasOpacity: 0.66, topology: true },
+        kicker: "STAGE 05 / VOIDS",
+        title: "空洞成熟",
+        text: "物质持续向墙、丝和节点迁移，低密度区域被抽空并扩展成空洞。最终画面把空洞、墙、丝和节点放回同一个三维宇宙网中。",
+      },
+    ];
+
+    this.setStep(0, { fromPlayback: true });
+    this.renderer.setCameraPose(shots.far.position, shots.far.target);
+    for (const chapter of chapters) {
+      if (!state.story.running) return;
+      this._setCinematicChapter(chapter.kicker, chapter.title, chapter.text);
+      const ready = await this._transitionStoryLook(chapter.look);
+      if (!ready) return;
+      const done = await this._tweenStoryStep(chapter.from, chapter.to, chapter.duration, chapter.shot0, chapter.shot1);
+      if (!done) return;
+    }
+    this._finishCinematic();
+  }
+
+  _finishCinematic() {
+    state.story.running = false;
+    this.renderer.setSteps(state.tf.steps);
+    this.setStep(99);
+    this._applyStoryLook({ mode: 0, density: 1.08, atlas: true, atlasOpacity: 0.66, topology: true });
+    $("#cinematicOverlay").classList.remove("running", "look-fade", "chapter-changing");
+    $("#cinematicOverlay").classList.add("complete");
+    $("#btnStory").textContent = "重看";
+    this.renderer.setControlsEnabled(true);
+    this._setCinematicChapter(
+      "COMPLETE / COSMIC WEB",
+      "成熟宇宙网",
+      "短片已停在最终结构。现在可以旋转观察，或进入探索模式查看直方图、功率谱、形态分类和探针剖面。"
+    );
+    this._updateCinematicHUD(99);
+  }
+
+  _exitCinematic({ restoreCamera = false, restorePage = false, restoreRenderState = false, page = null } = {}) {
     state.story.running = false;
     this._hideNetwork();
     clearTimeout(this._storyTimer);
-    $("#app").classList.remove("story-mode");
+    cancelAnimationFrame(this.storyProgressFrame);
+    $("#app").classList.remove("story-mode", "cinema-home");
+    $("#cinematicOverlay").classList.add("hidden");
+    $("#cinematicOverlay").classList.remove("home", "running", "complete", "look-fade", "chapter-changing");
+    $("#storyCaption").classList.add("hidden");
+    $("#btnStory").textContent = "短片";
     this.renderer.setControlsEnabled(true);
+<<<<<<< HEAD
     if (this.storyEdgesVisible != null) {
       this.renderer.edges.visible = this.storyEdgesVisible;
       this.storyEdgesVisible = null;
@@ -839,16 +1422,35 @@ class App {
       this.storyPrevStepCount = null;
     }
     if (this.storyCameraPose) {
+=======
+    this.renderer.setSteps(state.tf.steps);
+    if (restoreRenderState && this.storySavedRender) {
+      state.tf.densityScale = this.storySavedRender.densityScale;
+      state.tf.steps = this.storySavedRender.steps;
+      this.renderer.setDensityScale(state.tf.densityScale);
+      this.renderer.setSteps(state.tf.steps);
+      state.atlas.active = this.storySavedRender.atlasActive;
+      state.atlas.opacity = this.storySavedRender.atlasOpacity;
+      state.brush = { ...this.storySavedRender.brush };
+      this._setTopologyVisible(this.storySavedRender.networkVisible);
+      this._setMode(this.storySavedRender.renderMode);
+      this.renderer.setAtlas(state.atlas.active, state.atlas.opacity, state.atlas.classes);
+      this.renderer.setBrush(state.brush.active, state.brush.min, state.brush.max);
+      $("#btnAtlas").classList.toggle("active", state.atlas.active);
+      this.storySavedRender = null;
+    }
+    if (restoreCamera && this.storyCameraPose) {
+>>>>>>> 71709beb1965ef6957c97889916a07434acb0364
       this.renderer.setCameraPose(this.storyCameraPose.position, this.storyCameraPose.target);
       this.storyCameraPose = null;
     }
-    $("#btnStory").textContent = "▶ Story Mode";
-    $("#storyCaption").classList.add("hidden");
-    if (this.pageBeforeStory) {
-      const page = this.pageBeforeStory;
-      this.pageBeforeStory = null;
-      this._setPage(page);
-    }
+    const nextPage = page || (restorePage ? this.pageBeforeStory : "explore");
+    this.pageBeforeStory = null;
+    if (nextPage) this._setPage(nextPage);
+  }
+
+  _stopStory() {
+    this._exitCinematic({ restoreCamera: true, restorePage: true, restoreRenderState: true });
   }
 
   // ---------------- panels update ----------------
@@ -870,6 +1472,68 @@ class App {
       if (bar) bar.style.width = `${Math.min(100, pct * (k === "node" ? 8 : k === "filament" ? 3 : 1))}%`;
       if (lbl) lbl.textContent = `${pct.toFixed(pct < 1 ? 2 : 1)}%`;
     }
+    this._renderDegreeChart(step);
+  }
+
+  _updateNetworkLayer(step = state.step) {
+    if (!this.dm?.preview || !this.renderer) return;
+    const network = this.dm.buildNetwork(step, this.networkModel || "fixed");
+    this.currentNetwork = network;
+    const opacity = this.networkModel === "fixed" ? 0.16 : this.networkModel === "varying" ? 0.20 : 0.24;
+    const pointOpacity = this.networkModel === "fixed" ? 0.58 : this.networkModel === "varying" ? 0.68 : 0.74;
+    this.renderer.setNetworkGeometry(network, { opacity, pointOpacity });
+    this._renderDegreeChart(step);
+  }
+
+  _degreeDistribution(step) {
+    if (!this.currentNetwork || this.currentNetwork.step !== step || this.currentNetwork.model !== (this.networkModel || "fixed")) {
+      this.currentNetwork = this.dm.buildNetwork(step, this.networkModel || "fixed");
+    }
+    if (this.currentNetwork) {
+      return {
+        bins: this.currentNetwork.degreeBins,
+        avg: this.currentNetwork.averageDegree,
+        label: this.currentNetwork.componentLabel,
+      };
+    }
+    const counts = state.histograms?.matrix?.[step] || [];
+    const bins = Array.from({ length: 24 }, () => 0);
+    let total = 0;
+    let weighted = 0;
+    const mode = this.networkModel || "nearest";
+    const maxDegree = mode === "fixed" ? 34 : mode === "varying" ? 45 : 50;
+    const baseDegree = mode === "fixed" ? 4 : mode === "varying" ? 3 : 5;
+    const curve = mode === "fixed" ? 1.65 : mode === "varying" ? 1.08 : 0.82;
+    const networkWeight = mode === "fixed" ? 2.8 : mode === "varying" ? 2.35 : 2.0;
+    counts.forEach((count, i) => {
+      const t = counts.length > 1 ? i / (counts.length - 1) : 0;
+      const weight = count * Math.pow(Math.max(t, 0.02), networkWeight);
+      const degree = Math.min(maxDegree, Math.round(baseDegree + Math.pow(t, curve) * (maxDegree - baseDegree)));
+      const bin = Math.min(bins.length - 1, Math.floor((degree / 50) * bins.length));
+      bins[bin] += weight;
+      total += weight;
+      weighted += weight * degree;
+    });
+    return {
+      bins,
+      avg: total ? weighted / total : 0,
+      label: mode === "fixed" ? "定长连接" : mode === "varying" ? "自适应连接" : "近邻连接",
+    };
+  }
+
+  _renderDegreeChart(step = state.step) {
+    const el = $("#degreeChart");
+    if (!el) return;
+    const { bins, avg, label } = this._degreeDistribution(step);
+    const max = Math.max(...bins);
+    const denom = max > 0 ? max : 1;
+    el.innerHTML = bins.map((v, i) => {
+      const h = Math.max(2, (v / denom) * 58);
+      const tick = i % 4 === 0 ? `<span>${Math.round((i / (bins.length - 1)) * 50)}</span>` : "";
+      return `<i style="height:${h.toFixed(1)}px">${tick}</i>`;
+    }).join("");
+    $("#degreeValue").textContent = d3.format(".2f")(avg);
+    $("#componentLabel").textContent = label;
   }
 
   _updateSelStats(step) {
