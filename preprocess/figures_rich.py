@@ -21,21 +21,28 @@ from matplotlib.colors import LinearSegmentedColormap, ListedColormap
 from scipy import ndimage
 from skimage.morphology import skeletonize
 from PIL import Image, ImageDraw
+from plot_style import (
+    DENSITY_CMAP,
+    DENSITY_CMAP_STRONG,
+    DIVERGING_CMAP,
+    OKABE_ITO,
+    PAPER,
+    WEB_CLASSES,
+    WEB_CLASSES_MUTED,
+    add_panel_label,
+    apply_paper_style,
+    legend_clean,
+    style_axes,
+)
 
-plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Microsoft JhengHei", "SimSun", "DejaVu Sans"]
-plt.rcParams.update({
-    "axes.unicode_minus": False, "figure.facecolor": "white", "axes.facecolor": "white",
-    "savefig.facecolor": "white", "text.color": "#1b2740", "axes.labelcolor": "#1b2740",
-    "xtick.color": "#5d6b86", "ytick.color": "#5d6b86", "axes.edgecolor": "#c6d2e6",
-    "font.size": 10, "axes.titlecolor": "#0d8c8a",
-})
+apply_paper_style()
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(_ROOT, "public", "data")
 NYX = os.path.join(_ROOT, "Nyx")
 OUT = os.path.join(_ROOT, "outputs")
-cosmic = LinearSegmentedColormap.from_list("cosmic", ["#05040c", "#10204a", "#1f6f9e", "#38e1d6", "#ffcc66", "#fffaf0"])
-CLASS_COLORS = ["#46568a", "#2f74e0", "#0ea5a3", "#d68a06"]  # void/sheet/filament/node
+cosmic = DENSITY_CMAP
+CLASS_COLORS = [WEB_CLASSES_MUTED[c] for c in ["void", "sheet", "filament", "node"]]
 
 meta = json.load(open(os.path.join(DATA, "metadata.json"), encoding="utf-8"))
 GMIN, GMAX = meta["globalLogMin"], meta["globalLogMax"]
@@ -68,25 +75,29 @@ def fig_lyman_alpha():
     zv, yv = np.unravel_index(np.argmin(colmax), colmax.shape)
     filcount = (tw == 2).sum(axis=2)  # (z,y) filament 体素数
     zf, yf = np.unravel_index(np.argmax(filcount), filcount.shape)
-    lines = [("穿过 NODE 节点", v[zc, yc, :], "#d68a06"),
-             ("穿过 FILAMENT 丝", v[zf, yf, :], "#0ea5a3"),
-             ("穿过 VOID 空洞", v[zv, yv, :], "#2f74e0")]
+    lines = [("NODE sightline", v[zc, yc, :], PAPER["orange"]),
+             ("FILAMENT sightline", v[zf, yf, :], PAPER["teal"]),
+             ("VOID sightline", v[zv, yv, :], PAPER["blue"])]
     x = np.linspace(0, 1, 128)
-    fig, axes = plt.subplots(3, 1, figsize=(9.5, 8), sharex=True)
-    for ax, (name, ld, c) in zip(axes, lines):
+    fig, axes = plt.subplots(3, 1, figsize=(9.2, 7.6), sharex=True)
+    for i, (ax, (name, ld, c)) in enumerate(zip(axes, lines)):
         F = proxy_spectrum(ld)
         ax.fill_between(x, ld, GMIN, color=c, alpha=0.16)
-        ax.plot(x, ld, color=c, lw=1.8, label="log10 ρ")
-        ax.set_ylim(GMIN, GMAX); ax.set_ylabel("log10 ρ", color=c)
+        ax.plot(x, ld, color=c, lw=1.8, label="log10 rho")
+        ax.set_ylim(GMIN, GMAX); ax.set_ylabel("log10 rho", color=c)
         ax2 = ax.twinx()
-        ax2.plot(x, F, color="#c0392b", lw=1.8, label="透射流量 F")
-        ax2.fill_between(x, F, 0, color="#c0392b", alpha=0.08)
-        ax2.set_ylim(0, 1.05); ax2.set_ylabel("透射流量 F", color="#c0392b")
+        ax2.plot(x, F, color=PAPER["sky"], lw=1.8, label="Flux F")
+        ax2.fill_between(x, F, 0, color=PAPER["sky"], alpha=0.08)
+        ax2.set_ylim(0, 1.05); ax2.set_ylabel("Flux F", color=PAPER["sky"])
         ax.set_title(name)
-    axes[-1].set_xlabel("沿视线位置 (归一化)")
-    fig.suptitle("莱曼-α proxy 合成光谱: τ=A·∫ρ^β ds, F=exp(−τ)  (密度驱动近似, 非严格辐射转移)",
-                 color="#0d8c8a", fontsize=12)
-    plt.tight_layout(); plt.savefig(os.path.join(OUT, "lyman_alpha_lines.png"), dpi=130); plt.close()
+        style_axes(ax)
+        ax2.spines["top"].set_visible(False)
+        ax2.spines["right"].set_color(PAPER["spine"])
+        add_panel_label(ax, chr(ord("a") + i))
+    axes[-1].set_xlabel("Normalized line position")
+    fig.suptitle("Lyman-alpha proxy spectra: tau = A * integral rho^beta ds, F = exp(-tau)",
+                 color=PAPER["ink"], fontsize=12)
+    plt.tight_layout(); plt.savefig(os.path.join(OUT, "lyman_alpha_lines.png"), dpi=180); plt.close()
 
 
 def fig_morph_slices():
@@ -95,31 +106,39 @@ def fig_morph_slices():
     px = load_labels("labels", 99)[z]
     tw = load_labels("labels_tweb", 99)[z]
     cmap_cls = ListedColormap(CLASS_COLORS)
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4.8))
-    axes[0].imshow(v, origin="lower", cmap=cosmic); axes[0].set_title("log 密度切片 z=64  t=99")
-    for ax, lab, title in [(axes[1], px, "density-Hessian 形态学"), (axes[2], tw, "严格 T-web (势场)")]:
-        ax.imshow(v, origin="lower", cmap="gray", alpha=0.55)
+    fig, axes = plt.subplots(1, 3, figsize=(13.4, 4.6))
+    axes[0].imshow(v, origin="lower", cmap=DENSITY_CMAP_STRONG,
+                   vmin=np.percentile(v, 0.5), vmax=np.percentile(v, 99.7))
+    axes[0].set_title("Log-density slice, z=64, t=99")
+    for ax, lab, title in [(axes[1], px, "Density-Hessian morphology"), (axes[2], tw, "Strict T-web")]:
+        ax.imshow(v, origin="lower", cmap=DENSITY_CMAP, alpha=0.58)
         masked = np.ma.masked_where(lab == 0, lab)  # 隐藏 void
-        ax.imshow(masked, origin="lower", cmap=cmap_cls, vmin=0, vmax=3, alpha=0.85)
+        ax.imshow(masked, origin="lower", cmap=cmap_cls, vmin=0, vmax=3, alpha=0.82)
         ax.set_title(title)
     from matplotlib.patches import Patch
     axes[2].legend(handles=[Patch(color=CLASS_COLORS[i], label=l) for i, l in
-                            enumerate(["void(隐)", "sheet 墙", "filament 丝", "node 节点"])],
-                   loc="upper right", fontsize=8, framealpha=0.85)
-    fig.suptitle("宇宙网形态学分类叠加在密度切片上 (两种方法对比)", color="#0d8c8a", fontsize=12)
-    plt.tight_layout(); plt.savefig(os.path.join(OUT, "morph_slices.png"), dpi=130); plt.close()
+                            enumerate(["void (hidden)", "sheet", "filament", "node"])],
+                   loc="upper right", fontsize=8, framealpha=0.95, edgecolor=PAPER["grid"])
+    for i, ax in enumerate(axes):
+        style_axes(ax, grid=False)
+        ax.set_xticks([]); ax.set_yticks([])
+        add_panel_label(ax, chr(ord("a") + i))
+    fig.suptitle("Cosmic-web morphology overlays on a density slice", color=PAPER["ink"], fontsize=12)
+    plt.tight_layout(); plt.savefig(os.path.join(OUT, "morph_slices.png"), dpi=180); plt.close()
 
 
 def fig_evolution_gallery():
     steps = [0, 20, 40, 60, 80, 99]
     mips = [load_vol(s).max(axis=0) for s in steps]
     vmin = min(m.min() for m in mips); vmax = max(m.max() for m in mips)
-    fig, axes = plt.subplots(1, 6, figsize=(16, 3.1))
+    fig, axes = plt.subplots(1, 6, figsize=(15.5, 3.05))
     for ax, s, m in zip(axes, steps, mips):
-        ax.imshow(m, origin="lower", cmap="magma", vmin=vmin, vmax=vmax)
+        ax.imshow(m, origin="lower", cmap=DENSITY_CMAP_STRONG, vmin=vmin, vmax=vmax)
         ax.set_title(f"t = {s}", fontsize=11); ax.set_xticks([]); ax.set_yticks([])
-    fig.suptitle("密度场 MIP 演化画廊: 早期弥散 → 晚期节点/丝增亮、空洞变暗", color="#0d8c8a", fontsize=12)
-    plt.tight_layout(); plt.savefig(os.path.join(OUT, "evolution_gallery.png"), dpi=130); plt.close()
+        style_axes(ax, grid=False)
+    fig.suptitle("MIP evolution gallery: diffuse early field to late-time filaments and nodes",
+                 color=PAPER["ink"], fontsize=12)
+    plt.tight_layout(); plt.savefig(os.path.join(OUT, "evolution_gallery.png"), dpi=180); plt.close()
 
 
 def fig_skeleton():
@@ -127,14 +146,14 @@ def fig_skeleton():
     mask = tw >= 2  # filament + node
     skel = skeletonize(mask)
     zz, yy, xx = np.where(skel)
-    fig = plt.figure(figsize=(8.5, 7.5))
+    fig = plt.figure(figsize=(8.2, 7.2))
     ax = fig.add_subplot(111, projection="3d")
-    ax.scatter(xx, yy, zz, s=1.2, c=zz, cmap="cool", alpha=0.55, linewidths=0)
-    ax.set_title(f"高密度丝状结构骨架线提取 (skeletonize 3D, t=99, {len(xx)} 骨架体素)", color="#0d8c8a")
+    ax.scatter(xx, yy, zz, s=6.0, c=PAPER["sky"], alpha=0.98, linewidths=0, depthshade=False)
+    ax.set_title(f"3D skeleton of high-density filaments (t=99, {len(xx)} voxels)", color=PAPER["ink"])
     for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
-        axis.pane.set_facecolor("white"); axis.pane.set_alpha(0.4)
+        axis.pane.set_facecolor(PAPER["panel"]); axis.pane.set_alpha(0.82)
     ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z"); ax.view_init(28, 42)
-    plt.tight_layout(); plt.savefig(os.path.join(OUT, "skeleton_3d.png"), dpi=130); plt.close()
+    plt.tight_layout(); plt.savefig(os.path.join(OUT, "skeleton_3d.png"), dpi=180); plt.close()
 
 
 def fig_clusters_3d():
@@ -152,30 +171,34 @@ def fig_clusters_3d():
     if len(xx) > 40000:
         idx = np.random.default_rng(0).choice(len(xx), 40000, replace=False)
         zz, yy, xx, ids = zz[idx], yy[idx], xx[idx], ids[idx]
-    fig = plt.figure(figsize=(8.5, 7.5))
+    fig = plt.figure(figsize=(8.2, 7.2))
     ax = fig.add_subplot(111, projection="3d")
-    ax.scatter(xx, yy, zz, s=2, c=ids % 20, cmap="tab20", alpha=0.6, linewidths=0)
-    ax.set_title(f"高密度连通域 3D 散点 (logρ>{hi:.2f}, 共 {n} 团块, t=99)", color="#0d8c8a")
+    ax.scatter(xx, yy, zz, s=4.0, c=PAPER["blue"],
+               alpha=0.78, linewidths=0, depthshade=False)
+    ax.set_title(f"High-density connected components (log rho > {hi:.2f}, {n} components, t=99)",
+                 color=PAPER["ink"])
     for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
-        axis.pane.set_facecolor("white"); axis.pane.set_alpha(0.4)
+        axis.pane.set_facecolor(PAPER["panel"]); axis.pane.set_alpha(0.82)
     ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z"); ax.view_init(26, 130)
-    plt.tight_layout(); plt.savefig(os.path.join(OUT, "clusters_3d.png"), dpi=130); plt.close()
+    plt.tight_layout(); plt.savefig(os.path.join(OUT, "clusters_3d.png"), dpi=180); plt.close()
 
 
 def fig_void_top():
     z = 64
     v = load_vol(99)[z]
     q99, q5 = gp["99"], gp["5"]
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5.2))
+    fig, axes = plt.subplots(1, 2, figsize=(10.8, 5.0))
     for ax, mask, col, title in [
-        (axes[0], v >= q99, "#d68a06", f"Top1% 高密度 (logρ≥{q99:.2f}) — 宇宙网节点"),
-        (axes[1], v <= q5, "#2f74e0", f"Bottom5% 低密度 (logρ≤{q5:.2f}) — 空洞")]:
-        ax.imshow(v, origin="lower", cmap="gray", alpha=0.5)
+        (axes[0], v >= q99, PAPER["orange"], f"Top 1% high density (log rho >= {q99:.2f})"),
+        (axes[1], v <= q5, PAPER["blue"], f"Bottom 5% low density (log rho <= {q5:.2f})")]:
+        ax.imshow(v, origin="lower", cmap=DENSITY_CMAP, alpha=0.65)
         overlay = np.ma.masked_where(~mask, np.ones_like(v))
         ax.imshow(overlay, origin="lower", cmap=ListedColormap([col]), alpha=0.9)
         ax.set_title(title); ax.set_xticks([]); ax.set_yticks([])
-    fig.suptitle("密度尾部 对应 空间结构: 高密度尾=节点, 低密度=空洞 (切片 z=64, t=99)", color="#0d8c8a", fontsize=12)
-    plt.tight_layout(); plt.savefig(os.path.join(OUT, "void_top_slices.png"), dpi=130); plt.close()
+        style_axes(ax, grid=False)
+    fig.suptitle("Density tails mapped to spatial structures (slice z=64, t=99)",
+                 color=PAPER["ink"], fontsize=12)
+    plt.tight_layout(); plt.savefig(os.path.join(OUT, "void_top_slices.png"), dpi=180); plt.close()
 
 
 def fig_dual_compare():
@@ -184,21 +207,26 @@ def fig_dual_compare():
     ma, mb = va.max(axis=0), vb.max(axis=0)
     diff = mb - ma
     vmin = min(ma.min(), mb.min()); vmax = max(ma.max(), mb.max())
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4.6))
-    axes[0].imshow(ma, origin="lower", cmap="magma", vmin=vmin, vmax=vmax); axes[0].set_title(f"MIP  t={a}")
-    axes[1].imshow(mb, origin="lower", cmap="magma", vmin=vmin, vmax=vmax); axes[1].set_title(f"MIP  t={b}")
+    fig, axes = plt.subplots(1, 3, figsize=(13.4, 4.5))
+    axes[0].imshow(ma, origin="lower", cmap=DENSITY_CMAP_STRONG, vmin=vmin, vmax=vmax); axes[0].set_title(f"MIP, t={a}")
+    axes[1].imshow(mb, origin="lower", cmap=DENSITY_CMAP_STRONG, vmin=vmin, vmax=vmax); axes[1].set_title(f"MIP, t={b}")
     d = np.abs(diff).max()
-    im = axes[2].imshow(diff, origin="lower", cmap="RdBu_r", vmin=-d, vmax=d)
-    axes[2].set_title(f"差异 (t{b} − t{a}): 红=增强, 蓝=减弱")
+    im = axes[2].imshow(diff, origin="lower", cmap=DIVERGING_CMAP, vmin=-d, vmax=d)
+    axes[2].set_title(f"Difference (t{b} - t{a})")
     plt.colorbar(im, ax=axes[2], fraction=0.046)
-    for ax in axes: ax.set_xticks([]); ax.set_yticks([])
-    fig.suptitle("双时间步对比: 节点/丝处密度增强, 空洞处减弱", color="#0d8c8a", fontsize=12)
-    plt.tight_layout(); plt.savefig(os.path.join(OUT, "dual_step_compare.png"), dpi=130); plt.close()
+    for i, ax in enumerate(axes):
+        ax.set_xticks([]); ax.set_yticks([])
+        style_axes(ax, grid=False)
+        add_panel_label(ax, chr(ord("a") + i))
+    fig.suptitle("Dual-step comparison: density enhancement in filaments and nodes",
+                 color=PAPER["ink"], fontsize=12)
+    plt.tight_layout(); plt.savefig(os.path.join(OUT, "dual_step_compare.png"), dpi=180); plt.close()
 
 
 def _to_rgb(a2d, cmap, vmin, vmax, size=384, label=None):
     n = np.clip((a2d - vmin) / (vmax - vmin), 0, 1)
-    rgb = (plt.get_cmap(cmap)(n)[..., :3] * 255).astype(np.uint8)
+    cm = cmap if hasattr(cmap, "__call__") else plt.get_cmap(cmap)
+    rgb = (cm(n)[..., :3] * 255).astype(np.uint8)
     im = Image.fromarray(rgb[::-1]).resize((size, size), Image.BILINEAR)  # origin lower
     if label:
         d = ImageDraw.Draw(im); d.text((10, 8), label, fill=(255, 255, 255))
@@ -208,7 +236,7 @@ def _to_rgb(a2d, cmap, vmin, vmax, size=384, label=None):
 def gif_evolution():
     mips = [load_vol(s).max(axis=0) for s in range(100)]
     vmin = min(m.min() for m in mips); vmax = max(m.max() for m in mips)
-    frames = [_to_rgb(m, "magma", vmin, vmax, 384, f"t={s:03d}  MIP") for s, m in enumerate(mips)]
+    frames = [_to_rgb(m, DENSITY_CMAP_STRONG, vmin, vmax, 384, f"t={s:03d}  MIP") for s, m in enumerate(mips)]
     frames[0].save(os.path.join(OUT, "evolution_mip.gif"), save_all=True,
                    append_images=frames[1:], duration=70, loop=0)
 

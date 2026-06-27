@@ -10,6 +10,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from plot_style import OKABE_ITO, PAPER, apply_paper_style, legend_clean, style_axes
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NYX = os.path.join(_ROOT, "Nyx")
@@ -20,9 +21,7 @@ N = 100
 # rho_crit ~ 2.775e11 h^2 Msun/Mpc^3 (h=0.674) -> ~1.26e11; Omega_b~0.049 -> ~6.2e9 -> log10~9.79
 COSMIC_BARYON_LOG10 = 9.79
 
-plt.rcParams.update({"figure.facecolor": "white", "axes.facecolor": "white", "savefig.facecolor": "white",
-                     "text.color": "#1b2740", "axes.labelcolor": "#1b2740", "xtick.color": "#5d6b86",
-                     "ytick.color": "#5d6b86", "axes.edgecolor": "#c6d2e6", "axes.titlecolor": "#0d8c8a"})
+apply_paper_style()
 
 
 def load_vol(s):
@@ -61,15 +60,16 @@ def main():
         f.write(text)
 
     t = np.arange(N)
-    fig, ax = plt.subplots(figsize=(9, 5))
-    ax.plot(t, log10_meanRho, color="#0d8c8a", lw=2.2, label="log10<rho>  (linear mean, ~conserved)")
-    ax.plot(t, meanV, color="#d97706", lw=2.2, label="<log10 rho>  (mean of log, drops)")
-    ax.axhline(COSMIC_BARYON_LOG10, color="#6d5ef0", ls="--", lw=1.4, label=f"cosmic baryon ~{COSMIC_BARYON_LOG10}")
-    ax.fill_between(t, meanV, log10_meanRho, color="#9bb7d8", alpha=0.25, label="Jensen gap = (ln10/2)*Var")
+    fig, ax = plt.subplots(figsize=(8.6, 4.8))
+    ax.plot(t, log10_meanRho, color=OKABE_ITO[0], lw=2.3, label="log10<rho>  (linear mean, ~conserved)")
+    ax.plot(t, meanV, color=OKABE_ITO[1], lw=2.3, label="<log10 rho>  (mean of log, drops)")
+    ax.axhline(COSMIC_BARYON_LOG10, color=PAPER["slate"], ls="--", lw=1.5, label=f"cosmic baryon ~{COSMIC_BARYON_LOG10}")
+    ax.fill_between(t, meanV, log10_meanRho, color=OKABE_ITO[5], alpha=0.20, label="Jensen gap = (ln10/2)*Var")
     ax.set_xlabel("time step"); ax.set_ylabel("log10 density")
-    ax.set_title("Mass-conservation test: linear mean ~constant, mean-of-log drops (Jensen)")
-    ax.legend(framealpha=0.2, labelcolor="#1b2740", fontsize=9)
-    plt.tight_layout(); plt.savefig(os.path.join(OUT, "mass_conservation.png"), dpi=130); plt.close()
+    ax.set_title("Mass-conservation test")
+    style_axes(ax)
+    legend_clean(ax, loc="best", fontsize=8.5)
+    plt.tight_layout(); plt.savefig(os.path.join(OUT, "mass_conservation.png"), dpi=180); plt.close()
     print("\nsaved -> mass_conservation.png")
 
 

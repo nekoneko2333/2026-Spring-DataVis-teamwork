@@ -18,6 +18,9 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from plot_style import DENSITY_CMAP, HEAT_CMAP, PAPER, apply_paper_style, style_axes
+
+apply_paper_style()
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(_ROOT, "Nyx")
@@ -77,17 +80,20 @@ def save_axis_check(vol, tag):
     }
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     for ax, (title, img) in zip(axes[0], slices.items()):
-        im = ax.imshow(img, origin="lower", cmap="inferno", aspect="equal")
+        im = ax.imshow(img, origin="lower", cmap=HEAT_CMAP, aspect="equal")
         ax.set_title(title, fontsize=10)
         plt.colorbar(im, ax=ax, fraction=0.046)
     for ax, (title, img) in zip(axes[1], mips.items()):
-        im = ax.imshow(img, origin="lower", cmap="magma", aspect="equal")
+        im = ax.imshow(img, origin="lower", cmap=DENSITY_CMAP, aspect="equal")
         ax.set_title(title, fontsize=10)
         plt.colorbar(im, ax=ax, fraction=0.046)
+    for ax in axes.ravel():
+        style_axes(ax, grid=False)
+        ax.set_xticks([]); ax.set_yticks([])
     fig.suptitle(f"Axis / orientation check  [{tag}]  (log10 density)", fontsize=13)
     plt.tight_layout()
     p = os.path.join(OUT_DIR, f"axis_check_{tag}.png")
-    plt.savefig(p, dpi=110)
+    plt.savefig(p, dpi=180)
     plt.close()
     return p
 
@@ -97,15 +103,17 @@ def save_hist(vol, tag):
     pos = flat[flat > 0]
     logv = np.log10(pos)
     fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
-    axes[0].hist(flat, bins=200, color="#3aa0ff")
+    axes[0].hist(flat, bins=200, color=PAPER["blue"], alpha=0.88)
     axes[0].set_title(f"linear density hist [{tag}]")
     axes[0].set_yscale("log")
-    axes[1].hist(logv, bins=200, color="#ffb454")
+    axes[1].hist(logv, bins=200, color=PAPER["orange"], alpha=0.88)
     axes[1].set_title(f"log10 density hist [{tag}]")
     axes[1].set_yscale("log")
+    for ax in axes:
+        style_axes(ax)
     plt.tight_layout()
     p = os.path.join(OUT_DIR, f"hist_{tag}.png")
-    plt.savefig(p, dpi=110)
+    plt.savefig(p, dpi=180)
     plt.close()
     return p
 

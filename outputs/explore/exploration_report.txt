@@ -1,0 +1,95 @@
+Nyx 宇宙学体数据 — 数据探查报告
+============================================================
+数据目录: C:\Dev\workspaces\Python_Projects\data_visualization\essay\Nyx
+单文件期望字节数: 8388608 = 128^3 * 4
+读取: np.fromfile('<f4').reshape((128,128,128), order='F') -> (z,y,x)
+
+=== t=0000  (file bytes=8388608) ===
+  shape           : (128, 128, 128) (z,y,x)
+  dtype           : float32
+  min / max       : 7.98443 / 13.8433
+  mean / std      : 9.48538 / 0.431775
+  median          : 9.45036
+  #(<=0)          : 0  (0.0000%)
+  #(==0)          : 0
+  #(<0)           : 0
+  #(nan)/#(inf)   : 0 / 0
+  percentiles:
+      0.00% -> 7.98443
+      0.10% -> 8.40141
+      1.00% -> 8.62764
+      5.00% -> 8.84881
+     25.00% -> 9.19426
+     50.00% -> 9.45036
+     75.00% -> 9.72947
+     95.00% -> 10.2454
+     99.00% -> 10.7255
+     99.90% -> 11.4782
+    100.00% -> 13.8433
+
+  -> axis check : C:\Dev\workspaces\Python_Projects\data_visualization\essay\outputs\explore\axis_check_t0000.png
+  -> histogram  : C:\Dev\workspaces\Python_Projects\data_visualization\essay\outputs\explore\hist_t0000.png
+
+=== t=0050  (file bytes=8388608) ===
+  shape           : (128, 128, 128) (z,y,x)
+  dtype           : float32
+  min / max       : 7.86027 / 14.3269
+  mean / std      : 9.39541 / 0.469276
+  median          : 9.35507
+  #(<=0)          : 0  (0.0000%)
+  #(==0)          : 0
+  #(<0)           : 0
+  #(nan)/#(inf)   : 0 / 0
+  percentiles:
+      0.00% -> 7.86027
+      0.10% -> 8.24707
+      1.00% -> 8.47254
+      5.00% -> 8.70529
+     25.00% -> 9.07614
+     50.00% -> 9.35507
+     75.00% -> 9.66291
+     95.00% -> 10.2222
+     99.00% -> 10.7507
+     99.90% -> 11.5241
+    100.00% -> 14.3269
+
+  -> axis check : C:\Dev\workspaces\Python_Projects\data_visualization\essay\outputs\explore\axis_check_t0050.png
+  -> histogram  : C:\Dev\workspaces\Python_Projects\data_visualization\essay\outputs\explore\hist_t0050.png
+
+=== t=0099  (file bytes=8388608) ===
+  shape           : (128, 128, 128) (z,y,x)
+  dtype           : float32
+  min / max       : 7.75329 / 14.4494
+  mean / std      : 9.3187 / 0.498307
+  median          : 9.27454
+  #(<=0)          : 0  (0.0000%)
+  #(==0)          : 0
+  #(<0)           : 0
+  #(nan)/#(inf)   : 0 / 0
+  percentiles:
+      0.00% -> 7.75329
+      0.10% -> 8.12017
+      1.00% -> 8.34578
+      5.00% -> 8.58782
+     25.00% -> 8.97802
+     50.00% -> 9.27454
+     75.00% -> 9.6028
+     95.00% -> 10.1978
+     99.00% -> 10.7601
+     99.90% -> 11.5855
+    100.00% -> 14.4494
+
+  -> axis check : C:\Dev\workspaces\Python_Projects\data_visualization\essay\outputs\explore\axis_check_t0099.png
+  -> histogram  : C:\Dev\workspaces\Python_Projects\data_visualization\essay\outputs\explore\hist_t0099.png
+
+============================================================
+结论推断
+============================================================
+t0000 mean = 9.48538, t0099 mean = 9.3187
+判断: 若各步均值≈1 且早期方差极小, 多为过密度 (1+delta) / 归一化密度;
+      若均值为某物理常数且随时间基本守恒, 为绝对(共动)密度。
+全场是否含 <=0 值: t0000=0, t0099=0
+决定: 密度场动态范围极大(长尾), 统计与传递函数一律采用 log10;
+      若存在 0 值, 取 log 前用极小正数 floor 截断。
+
+轴向核对: 请人工查看 axis_check_*.png, 确认 xy/xz/yz 切片与 MIP 无错位/转置/镜像。
