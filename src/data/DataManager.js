@@ -22,11 +22,8 @@ export class DataManager {
     this.labelInflight = new Map();
     this.labelLimit = 6;
     this.networkCache = new Map();
-<<<<<<< HEAD
-    this.networkInflight = new Map();
-=======
+
     this.networkCacheLimit = 24;
->>>>>>> 71709beb1965ef6957c97889916a07434acb0364
     this.preview = null;
     this.previewGradient = null;
     this.previewTex = null;
@@ -177,13 +174,7 @@ export class DataManager {
   }
 
   getCachedVolumeSet(step) {
-<<<<<<< HEAD
-    if (!this.cache.has(step)) return null;
-    const entry = this.cache.get(step);
-    entry.ts = performance.now();
-    return entry;
-  }
-=======
+
     const entry = this.cache.get(step);
     if (!entry) return null;
     entry.ts = performance.now();
@@ -306,7 +297,6 @@ export class DataManager {
     return network;
   }
 
->>>>>>> 71709beb1965ef6957c97889916a07434acb0364
   getVolumeTexture(step) {
     return this.getVolumeSet(step).then((entry) => entry.volumeTex);
   }

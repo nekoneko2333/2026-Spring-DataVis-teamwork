@@ -1,15 +1,10 @@
 // Three.js 体渲染主视图: 透视相机 + OrbitControls + 光线步进 ShaderMaterial。
 // 负责场景/相机/交互与 uniform 更新, 并提供探针视线拾取(相机射线∩单位立方体)。
 import {
-<<<<<<< HEAD
-  Scene, PerspectiveCamera, WebGLRenderer, BoxGeometry, SphereGeometry, Mesh, ShaderMaterial,
-  GLSL3, Vector3, Vector2, BackSide, DoubleSide, Group, LineSegments, EdgesGeometry,
-  LineBasicMaterial, BufferGeometry, Line, AdditiveBlending, NormalBlending,
-=======
+
   Scene, PerspectiveCamera, WebGLRenderer, BoxGeometry, Mesh, ShaderMaterial,
   GLSL3, Vector3, Vector2, BackSide, DoubleSide, LineSegments, EdgesGeometry,
   LineBasicMaterial, BufferGeometry, Line, AdditiveBlending, Points, PointsMaterial,
->>>>>>> 71709beb1965ef6957c97889916a07434acb0364
   Data3DTexture, RedFormat, RGBFormat, FloatType, NearestFilter, UnsignedByteType,
   MeshBasicMaterial, MeshStandardMaterial, AmbientLight, DirectionalLight, BufferAttribute, Float32BufferAttribute,
 } from "three";
@@ -137,14 +132,7 @@ export class VolumeRenderer {
     this.edges.visible = false;
     this.scene.add(this.edges);
 
-<<<<<<< HEAD
-    this.networkGroup = new Group();
-    this.networkGroup.visible = false;
-    this.networkGroup.renderOrder = 20;
-    this.networkEdgeLine = null;
-    this.networkNodeMeshes = [];
-    this.scene.add(this.networkGroup);
-=======
+
     this.networkLineMaterial = new LineBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -169,7 +157,6 @@ export class VolumeRenderer {
     this.networkPoints.renderOrder = 6;
     this.scene.add(this.networkLines);
     this.scene.add(this.networkPoints);
->>>>>>> 71709beb1965ef6957c97889916a07434acb0364
 
     // MC 真实网格(光照渲染)
     this.scene.add(new AmbientLight(0x4a6a9a, 0.9));
